@@ -1,12 +1,29 @@
+#pragma once
 #include <vulkan/vulkan.h>
-// TODO: Backend WINDOWS (DX12) / LINUX (OpenGL) for Stereo 3D
+#include "native_render_handle.h"
 
-namespace vk360
-{
-    struct VulkanData {
-        VkDevice device;
-        VkQueue queue;
+class Vulkan360 {
+private:
+    enum DisplayBaseShape : uint8_t { BASE_SHAPE_PLANE, BASE_SHAPE_CYLINDER };
+    struct Config {
+        bool load_success;
+        DisplayBaseShape base_shape;
+        uint32_t facets;
+        double radius;
+        double height;
+        uint32_t resolution_w;
+        uint32_t resolution_h;
     };
-    
-    int init(const char* config_filename, VulkanData *vk);
-}
+
+    Config _config;
+    NativeRenderHandle _native_renderer;
+
+    void readDisplayConfig(const char* config_filename);
+
+public:
+    Vulkan360(const char* config_filename);
+    ~Vulkan360();
+
+    bool hasValidDisplayConfig();
+    void initializeWindow();
+};

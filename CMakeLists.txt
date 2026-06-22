@@ -7,14 +7,35 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Vulkan REQUIRED)
 
-add_executable(${PROJECT_NAME}
-    src/vk360.cpp
-    src/main.cpp
-)
+add_executable(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+target_sources(${PROJECT_NAME} PRIVATE
+    include/native_render_handle.h
+    include/vk360.h
+    src/vk360.cpp
+    src/main.cpp
+)
+
+if(WIN32)
+    target_sources(${PROJECT_NAME}
+        PRIVATE
+            src/native_render_windows.cpp
+    )
+elseif(UNIX)
+    target_sources(${PROJECT_NAME}
+        PRIVATE
+            src/native_render_linux.cpp
+    )
+else()
+    message(FATAL_ERROR
+        "Unsupported platform: only Windows and Linux are currently supported."
+    )
+endif()
+
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vulkan::Vulkan
