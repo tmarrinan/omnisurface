@@ -21,7 +21,7 @@ int main()
         return EXIT_FAILURE;
     }
     printf("OmniSurface Vulkan360 display config read in.\n");
-    renderer360->initializeWindow();
+    render360->initializeWindow();
 
     return EXIT_SUCCESS;
 }
