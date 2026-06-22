@@ -1,0 +1,6 @@
+OmniSurface Config
+Base Shape: plane
+Facets: 1
+Radius: 0.5
+Height: 0.3349625
+Resolution: 3440x1440
