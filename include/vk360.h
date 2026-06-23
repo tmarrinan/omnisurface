@@ -1,4 +1,5 @@
 #pragma once
+#include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
 #include "native_render_handle.h"
 
@@ -16,7 +17,8 @@ private:
     };
 
     Config _config;
-    NativeRenderHandle _native_renderer;
+    GLFWwindow* _window;
+    NativeRenderHandle* _native_renderer;
 
     void readDisplayConfig(const char* config_filename);
 
@@ -25,5 +27,5 @@ public:
     ~Vulkan360();
 
     bool hasValidDisplayConfig();
-    void initializeWindow();
+    int initializeWindow(const char* title);
 };

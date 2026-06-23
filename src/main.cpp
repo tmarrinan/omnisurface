@@ -14,14 +14,14 @@ int main()
         << VK_API_VERSION_PATCH(version)
         << std::endl;
 
-    Vulkan360 *render360 = new Vulkan360("resrc/config_plane.txt");
+    Vulkan360* render360 = new Vulkan360("resrc/config_plane.txt");
     if (!render360->hasValidDisplayConfig())
     {
         fprintf(stderr, "Error: Vulkan360 could not read display config file\n");
         return EXIT_FAILURE;
     }
     printf("OmniSurface Vulkan360 display config read in.\n");
-    render360->initializeWindow();
+    render360->initializeWindow("OmniSurface");
 
     return EXIT_SUCCESS;
 }

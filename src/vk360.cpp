@@ -7,11 +7,13 @@
 Vulkan360::Vulkan360(const char* config_filename)
 {
     readDisplayConfig(config_filename);
+    _native_renderer = new NativeRenderHandle();
 }
 
 Vulkan360::~Vulkan360()
 {
     // Clean up
+    delete _native_renderer;
 }
 
 bool Vulkan360::hasValidDisplayConfig()
@@ -19,10 +21,34 @@ bool Vulkan360::hasValidDisplayConfig()
     return _config.load_success;
 }
 
-void Vulkan360::initializeWindow()
+int Vulkan360::initializeWindow(const char* title)
 {
-    // TODO: GLFW - DX12 (Windows) or OpenGL (Linux)
-    //  * use NativeRenderHandler (`_native_renderer`)
+    if (!glfwInit())
+    {
+        fprintf(stderr, "Vulkan360> Failed to initialize GLFW\n");
+        return -1;
+    }
+
+    _window = _native_renderer->createFullscreenWindow(title);
+    if (!_window)
+    {
+        fprintf(stderr, "Vulkan360> Failed to create native render window\n");
+        glfwTerminate();
+        return -1;
+    }
+
+    // TESTING
+    while (!glfwWindowShouldClose(_window))
+    {
+        glfwPollEvents();
+
+        if (glfwGetKey(_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        {
+            glfwSetWindowShouldClose(_window, true);
+        }
+
+        _native_renderer->swapBuffers();
+    }
 }
 
 ///////////////////////////////////////////////////////////////

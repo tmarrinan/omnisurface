@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Vulkan REQUIRED)
+find_package(glfw3 REQUIRED)
 
 add_executable(${PROJECT_NAME})
 
@@ -21,14 +22,16 @@ target_sources(${PROJECT_NAME} PRIVATE
 )
 
 if(WIN32)
-    target_sources(${PROJECT_NAME}
-        PRIVATE
-            src/native_render_windows.cpp
+    target_sources(${PROJECT_NAME} PRIVATE
+        src/native_render_windows.cpp
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        d3d12
+        dxgi
     )
 elseif(UNIX)
-    target_sources(${PROJECT_NAME}
-        PRIVATE
-            src/native_render_linux.cpp
+    target_sources(${PROJECT_NAME} PRIVATE
+        src/native_render_linux.cpp
     )
 else()
     message(FATAL_ERROR
@@ -39,6 +42,7 @@ endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vulkan::Vulkan
+    glfw
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
