@@ -112,6 +112,16 @@ GLFWwindow* NativeRenderHandle::createFullscreenWindow(const char* title)
         return nullptr;
     }
 
+    // STEREO? Investigating how to support
+    if (_native_data->dxgi_factory->IsCurrent() && _native_data->dxgi_factory->IsWindowedStereoEnabled())
+    {
+        printf("STEREO 3D: supported!\n");
+    }
+    else
+    {
+        printf("STEREO 3D: not supported :(\n");
+    }
+
     // Initialize Swap Chain
     DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
     swap_chain_desc.BufferCount = 2;

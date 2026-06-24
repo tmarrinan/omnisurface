@@ -1,7 +1,9 @@
 #pragma once
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#include <vulkan/vulkan.h>
-#include "native_render_handle.h"
+#include <vector>
+//#include <vulkan/vulkan.h>
+//#include "native_render_handle.h"
 
 class Vulkan360 {
 private:
@@ -15,12 +17,34 @@ private:
         uint32_t resolution_w;
         uint32_t resolution_h;
     };
+    struct VulkanData {
+        VkInstance instance;
+        VkSurfaceKHR surface;
+        VkPhysicalDevice physical_device;
+        int q_family_index;
+        VkDevice device;
+        VkQueue queue;
+        VkSwapchainKHR swapchain;
+    };
 
     Config _config;
     GLFWwindow* _window;
-    NativeRenderHandle* _native_renderer;
+    uint32_t _window_w;
+    uint32_t _window_h;
+    VulkanData _vk;
+    bool _is_stereo;
 
     void readDisplayConfig(const char* config_filename);
+    void createFullscreenWindow(const char* title, GLFWwindow** window_ptr);
+    void createVulkanInstance(VkInstance* instance_ptr);
+    void createVulkanSurface(VkSurfaceKHR* surface_ptr);
+    void findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr);
+    int findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device);
+    bool hasStereo3dCapability();
+    void createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_ptr);
+    void createSwapChain(VkSwapchainKHR* swapchain_ptr);
+    VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& available_formats);
+    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height);
 
 public:
     Vulkan360(const char* config_filename);
