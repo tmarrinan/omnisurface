@@ -43,9 +43,14 @@ int Vulkan360::initializeWindow(const char* title)
     createVulkanInstance(&_vk.instance);
     createVulkanSurface(&_vk.surface);
     findPhysicalDevice(&_vk.physical_device, &_vk.q_family_index);
+
     _is_stereo = hasStereo3dCapability();
+    printf("Vulkan360> Info: creating %s window\n", _is_stereo ? "Stereo 3D" : "standard");
+
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
     createSwapChain(&_vk.swapchain);
+    createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
+    createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
 
     // TESTING
     while (!glfwWindowShouldClose(_window))
@@ -57,7 +62,6 @@ int Vulkan360::initializeWindow(const char* title)
             glfwSetWindowShouldClose(_window, true);
         }
 
-        _vk.swapchain
         //_native_renderer->swapBuffers();
     }
 
@@ -304,7 +308,6 @@ bool Vulkan360::hasStereo3dCapability()
         return false;
     }
 
-    printf("Surface: maxImageArrayLayers=%u\n", surface_capabilities.maxImageArrayLayers);
     if (surface_capabilities.maxImageArrayLayers < 2)
     {
         return false;
@@ -453,5 +456,52 @@ VkExtent2D Vulkan360::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
         actual_extent.width = std::clamp(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
         actual_extent.height = std::clamp(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
         return actual_extent;
+    }
+}
+
+void Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr)
+{
+    VkCommandPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.queueFamilyIndex = _vk.q_family_index;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+    if (vkCreateCommandPool(_vk.device, &pool_info, nullptr, pool_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: could not create `vkCommandPool`\n");
+        *pool_ptr = VK_NULL_HANDLE;
+        *cmd_ptr = VK_NULL_HANDLE;
+    }
+
+    VkCommandBufferAllocateInfo cmd_alloc_info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    cmd_alloc_info.commandPool = *pool_ptr;
+    cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmd_alloc_info.commandBufferCount = 1;
+
+    if (vkAllocateCommandBuffers(_vk.device, &cmd_alloc_info, cmd_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: could not allocate `vkCommandBuffer`\n");
+        *pool_ptr = VK_NULL_HANDLE;
+        *cmd_ptr = VK_NULL_HANDLE;
+    }
+}
+
+void Vulkan360::createSyncObjects(VkSemaphore* img_available_ptr, VkSemaphore* img_finished_ptr, VkFence* in_flight_ptr)
+{
+    VkSemaphoreCreateInfo sem_create_info{};
+    sem_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkFenceCreateInfo fence_create_info{};
+    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    if (vkCreateSemaphore(_vk.device, &sem_create_info, nullptr, img_available_ptr) != VK_SUCCESS ||
+        vkCreateSemaphore(_vk.device, &sem_create_info, nullptr, img_finished_ptr) != VK_SUCCESS ||
+        vkCreateFence(_vk.device, &fence_create_info, nullptr, in_flight_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create synchronization objects\n");
+        *img_available_ptr = VK_NULL_HANDLE;
+        *img_finished_ptr = VK_NULL_HANDLE;
+        *in_flight_ptr = VK_NULL_HANDLE;
     }
 }

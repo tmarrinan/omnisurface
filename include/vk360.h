@@ -25,6 +25,11 @@ private:
         VkDevice device;
         VkQueue queue;
         VkSwapchainKHR swapchain;
+        VkCommandPool pool;
+        VkCommandBuffer cmd;
+        VkSemaphore img_available;
+        VkSemaphore img_finished;
+        VkFence in_flight;
     };
 
     Config _config;
@@ -45,6 +50,8 @@ private:
     void createSwapChain(VkSwapchainKHR* swapchain_ptr);
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& available_formats);
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height);
+    void createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr);
+    void createSyncObjects(VkSemaphore* img_available_ptr, VkSemaphore* img_finished_ptr, VkFence* in_flight_ptr);
 
 public:
     Vulkan360(const char* config_filename);
