@@ -60,7 +60,7 @@ public:
     ~Vulkan360();
 
     bool hasValidDisplayConfig();
-    int initializeWindow(const char* title);
+    int initializeWindow(const char* title, const char* default_image);
     uint32_t getRenderBufferIndex();
     void drawFrame(uint32_t buffer_idx);
     void swapBuffers(uint32_t buffer_idx);

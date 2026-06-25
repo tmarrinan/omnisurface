@@ -15,6 +15,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 target_sources(${PROJECT_NAME} PRIVATE
+    include/stb_image.h
     include/native_render_handle.h
     include/vk360.h
     src/vk360.cpp

@@ -10,7 +10,7 @@ int main()
         return EXIT_FAILURE;
     }
     printf("OmniSurface Vulkan360 display config read in.\n");
-    app->initializeWindow("OmniSurface");
+    app->initializeWindow("OmniSurface", "resrc/images/SampleOmni3D.png");
 
     while (!app->shouldClose())
     {

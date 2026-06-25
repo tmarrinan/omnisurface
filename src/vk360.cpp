@@ -5,6 +5,9 @@
 #include <fstream>
 #include <algorithm>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #include "vk360.h"
 
 
@@ -37,7 +40,7 @@ bool Vulkan360::hasValidDisplayConfig()
     return _config.load_success;
 }
 
-int Vulkan360::initializeWindow(const char* title)
+int Vulkan360::initializeWindow(const char* title, const char* default_image)
 {
     createFullscreenWindow(title, &_window);
     createVulkanInstance(&_vk.instance);
@@ -51,6 +54,10 @@ int Vulkan360::initializeWindow(const char* title)
     createSwapChain(&_vk.swapchain, &_vk.swapchain_images);
     createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
     createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
+
+    int w, h, ch;
+    uint8_t* pixels = stbi_load(default_image, &w, &h, &ch, 4);
+    printf("Read in image: %dx%d, %p\n", w, h, pixels);
 
     // TODO: return -1 if any of the above fails
 
