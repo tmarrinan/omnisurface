@@ -48,24 +48,150 @@ int Vulkan360::initializeWindow(const char* title)
     printf("Vulkan360> Info: creating %s window\n", _is_stereo ? "Stereo 3D" : "standard");
 
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
-    createSwapChain(&_vk.swapchain);
+    createSwapChain(&_vk.swapchain, &_vk.swapchain_images);
     createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
     createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
 
-    // TESTING
-    while (!glfwWindowShouldClose(_window))
-    {
-        glfwPollEvents();
-
-        if (glfwGetKey(_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        {
-            glfwSetWindowShouldClose(_window, true);
-        }
-
-        //_native_renderer->swapBuffers();
-    }
+    // TODO: return -1 if any of the above fails
 
     return 0;
+}
+
+uint32_t Vulkan360::getRenderBufferIndex()
+{
+    // Wait for the previous frame to finish on the GPU
+    vkWaitForFences(_vk.device, 1, &_vk.in_flight, VK_TRUE, UINT64_MAX);
+    vkResetFences(_vk.device, 1, &_vk.in_flight);
+
+    // Acquire the next available image from the swapchain
+    uint32_t img_idx;
+    vkAcquireNextImageKHR(_vk.device, _vk.swapchain, UINT64_MAX, _vk.img_available, VK_NULL_HANDLE, &img_idx);
+
+    return img_idx;
+}
+
+void Vulkan360::drawFrame(uint32_t buffer_idx)
+{
+    // Record draw commands
+    VkImage current_image = _vk.swapchain_images[buffer_idx];
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    if (vkBeginCommandBuffer(_vk.cmd, &begin_info) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to begin recording command buffer\n");
+    }
+
+    /////
+    /////
+
+    VkImageMemoryBarrier barrierToClear{};
+    barrierToClear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrierToClear.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // likely ok, but could do transition to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR at creation time, then set to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR here
+    barrierToClear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrierToClear.srcAccessMask = 0;
+    barrierToClear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrierToClear.image = current_image;
+    barrierToClear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrierToClear.subresourceRange.baseMipLevel = 0;
+    barrierToClear.subresourceRange.levelCount = 1;
+    barrierToClear.subresourceRange.baseArrayLayer = 0;
+    barrierToClear.subresourceRange.layerCount = _is_stereo ? 2 : 1; // Clear both stereo layers if true
+
+    vkCmdPipelineBarrier(_vk.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrierToClear);
+
+    // =================================================================
+    // THE CLEAR COMMAND (Choose your background color here!)
+    // =================================================================
+    // Float values represent Normalized Red, Green, Blue, Alpha (0.0 to 1.0)
+    VkClearColorValue clearColor = { {0.2f, 0.3f, 0.4f, 1.0f} }; // A nice slate steel blue
+
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = _is_stereo ? 2 : 1; // Erase both stereo layers in tandem!
+
+    vkCmdClearColorImage(_vk.cmd, current_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
+
+    // --- BARRIER 2: Transition Image Layout back to Present Source ---
+    VkImageMemoryBarrier barrierToPresent = barrierToClear;
+    barrierToPresent.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrierToPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrierToPresent.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrierToPresent.dstAccessMask = 0;
+
+    vkCmdPipelineBarrier(_vk.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrierToPresent);
+
+    // =================================================================
+    // CLOSE THE COMMAND BUFFER
+    // =================================================================
+    if (vkEndCommandBuffer(_vk.cmd) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to record command buffer!");
+    }
+
+    /////
+    /////
+
+
+    // Submit your recorded drawing commands
+    VkSemaphore wait_semaphores[] = { _vk.img_available };
+    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    VkSemaphore signal_semaphores[] = { _vk.img_finished };
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = wait_semaphores;
+    submit_info.pWaitDstStageMask = wait_stages;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &_vk.cmd;
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = signal_semaphores;
+
+    if (vkQueueSubmit(_vk.queue, 1, &submit_info, _vk.in_flight) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
+    }
+}
+
+void Vulkan360::swapBuffers(uint32_t buffer_idx)
+{
+    // Present rendered image on swap chain
+    VkSwapchainKHR swapchains[] = { _vk.swapchain };
+    VkSemaphore signal_semaphores[] = { _vk.img_finished };
+
+    VkPresentInfoKHR present_info{};
+    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present_info.waitSemaphoreCount = 1;
+    present_info.pWaitSemaphores = signal_semaphores;
+    present_info.swapchainCount = 1;
+    present_info.pSwapchains = swapchains;
+    present_info.pImageIndices = &buffer_idx;
+    present_info.pResults = nullptr;
+
+    vkQueuePresentKHR(_vk.queue, &present_info);
+}
+
+bool Vulkan360::shouldClose()
+{
+    return glfwWindowShouldClose(_window);
+}
+
+void Vulkan360::pollEvents()
+{
+    glfwPollEvents();
+
+    if (glfwGetKey(_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
+        glfwSetWindowShouldClose(_window, true);
+    }
 }
 
 ///////////////////////////////////////////////////////////////
@@ -259,7 +385,7 @@ void Vulkan360::findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q
     vkEnumeratePhysicalDevices(_vk.instance, &device_count, physical_devices.data());
     for (uint32_t i = 0; i < physical_devices.size(); i++)
     {
-        VkPhysicalDeviceProperties2 props2 = {};
+        VkPhysicalDeviceProperties2 props2{};
         props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
         vkGetPhysicalDeviceProperties2(physical_devices[i], &props2);
 
@@ -291,7 +417,9 @@ int Vulkan360::findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device)
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.data());
     for (uint32_t i = 0; i < queue_family_count; i++)
     {
-        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)
+        VkBool32 present_support = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, _vk.surface, &present_support);
+        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT && present_support)
         {
             index = i;
             break;
@@ -364,7 +492,7 @@ void Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_
     vkGetDeviceQueue(*device_ptr, _vk.q_family_index, 0, queue_ptr);
 }
 
-void Vulkan360::createSwapChain(VkSwapchainKHR* swapchain_ptr)
+void Vulkan360::createSwapChain(VkSwapchainKHR* swapchain_ptr, std::vector<VkImage>* swapchain_images_ptr)
 {
     VkSurfaceCapabilitiesKHR capabilities;
     if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(_vk.physical_device, _vk.surface, &capabilities) != VK_SUCCESS)
@@ -386,20 +514,20 @@ void Vulkan360::createSwapChain(VkSwapchainKHR* swapchain_ptr)
     VkSurfaceFormatKHR surface_format = chooseSwapSurfaceFormat(formats);
     VkExtent2D extent = chooseSwapExtent(capabilities, _window_w, _window_h);
 
-    uint32_t image_count = capabilities.minImageCount + 1;
-    if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount)
+    uint32_t img_count = capabilities.minImageCount + 1;
+    if (capabilities.maxImageCount > 0 && img_count > capabilities.maxImageCount)
     {
-        image_count = capabilities.maxImageCount;
+        img_count = capabilities.maxImageCount;
     }
     
     VkSwapchainCreateInfoKHR swapchain_create_info{};
     swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapchain_create_info.surface = _vk.surface;
-    swapchain_create_info.minImageCount = image_count;
+    swapchain_create_info.minImageCount = img_count;
     swapchain_create_info.imageFormat = surface_format.format;
     swapchain_create_info.imageColorSpace = surface_format.colorSpace;
     swapchain_create_info.imageExtent = extent;
-    swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swapchain_create_info.preTransform = capabilities.currentTransform;
     swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -430,6 +558,14 @@ void Vulkan360::createSwapChain(VkSwapchainKHR* swapchain_ptr)
         fprintf(stderr, "Vulkan360> Error: could not create `VkSwapchainKHR`\n");
         *swapchain_ptr = VK_NULL_HANDLE;
     }
+
+    uint32_t swapchain_img_count = 0;
+    vkGetSwapchainImagesKHR(_vk.device, *swapchain_ptr, &swapchain_img_count, nullptr);
+    swapchain_images_ptr->resize(swapchain_img_count);
+    if (vkGetSwapchainImagesKHR(_vk.device, _vk.swapchain, &swapchain_img_count, swapchain_images_ptr->data()) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to get swapchain images\n");
+    }
 }
 
 VkSurfaceFormatKHR Vulkan360::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& available_formats)
@@ -452,7 +588,7 @@ VkExtent2D Vulkan360::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
     }
     else
     {
-        VkExtent2D actual_extent = {};
+        VkExtent2D actual_extent{};
         actual_extent.width = std::clamp(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
         actual_extent.height = std::clamp(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
         return actual_extent;
@@ -461,7 +597,7 @@ VkExtent2D Vulkan360::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
 
 void Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr)
 {
-    VkCommandPoolCreateInfo pool_info = {};
+    VkCommandPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pool_info.queueFamilyIndex = _vk.q_family_index;
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;

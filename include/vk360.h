@@ -1,6 +1,7 @@
 #pragma once
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <cstdint>
 #include <vector>
 //#include <vulkan/vulkan.h>
 //#include "native_render_handle.h"
@@ -30,6 +31,7 @@ private:
         VkSemaphore img_available;
         VkSemaphore img_finished;
         VkFence in_flight;
+        std::vector<VkImage> swapchain_images;
     };
 
     Config _config;
@@ -47,7 +49,7 @@ private:
     int findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device);
     bool hasStereo3dCapability();
     void createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_ptr);
-    void createSwapChain(VkSwapchainKHR* swapchain_ptr);
+    void createSwapChain(VkSwapchainKHR* swapchain_ptr, std::vector<VkImage>* swapchain_images_ptr);
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& available_formats);
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height);
     void createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr);
@@ -59,4 +61,9 @@ public:
 
     bool hasValidDisplayConfig();
     int initializeWindow(const char* title);
+    uint32_t getRenderBufferIndex();
+    void drawFrame(uint32_t buffer_idx);
+    void swapBuffers(uint32_t buffer_idx);
+    bool shouldClose();
+    void pollEvents();
 };

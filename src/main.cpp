@@ -3,25 +3,24 @@
 
 int main()
 {
-    uint32_t version = VK_API_VERSION_1_0;
-
-    if (vkEnumerateInstanceVersion)
-        vkEnumerateInstanceVersion(&version);
-
-    std::cout
-        << VK_API_VERSION_MAJOR(version) << "."
-        << VK_API_VERSION_MINOR(version) << "."
-        << VK_API_VERSION_PATCH(version)
-        << std::endl;
-
-    Vulkan360* render360 = new Vulkan360("resrc/config_plane.txt");
-    if (!render360->hasValidDisplayConfig())
+    Vulkan360* app = new Vulkan360("resrc/config_plane.txt");
+    if (!app->hasValidDisplayConfig())
     {
         fprintf(stderr, "Error: Vulkan360 could not read display config file\n");
         return EXIT_FAILURE;
     }
     printf("OmniSurface Vulkan360 display config read in.\n");
-    render360->initializeWindow("OmniSurface");
+    app->initializeWindow("OmniSurface");
+
+    while (!app->shouldClose())
+    {
+        app->pollEvents();
+        // TODO: process events here
+
+        int buffer_idx = app->getRenderBufferIndex();
+        app->drawFrame(buffer_idx);
+        app->swapBuffers(buffer_idx);
+    }
 
     return EXIT_SUCCESS;
 }
