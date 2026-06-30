@@ -1,14 +1,24 @@
+#include "vk360.h"
+
 #include <iostream>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <fstream>
 #include <algorithm>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <vulkan/vulkan_win32.h>
+#elif defined(__linux__)
+#include <X11/Xlib.h>
+#include <vulkan/vulkan_xlib.h>
+#endif
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-
-#include "vk360.h"
 
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
@@ -25,9 +35,17 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 }
 
 
-Vulkan360::Vulkan360(const char* config_filename)
+Vulkan360::Vulkan360(const char** exts, uint32_t ext_count, void* w_handle, void* m_handle) :
+    _is_stereo(false)
 {
-    readDisplayConfig(config_filename);
+    createVulkanInstance(exts, ext_count, &_vk.instance);
+    createVulkanSurface(w_handle, m_handle, &_vk.surface);
+    findPhysicalDevice(&_vk.physical_device, &_vk.q_family_index);
+    // TODO: check for stereo capability???
+    createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
+    //createSwapChain(&_vk.swapchain, &_vk.swapchain_images);
+    createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
+    //createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
 }
 
 Vulkan360::~Vulkan360()
@@ -35,31 +53,26 @@ Vulkan360::~Vulkan360()
     // Clean up
 }
 
-bool Vulkan360::hasValidDisplayConfig()
-{
-    return _config.load_success;
-}
-
 int Vulkan360::initializeWindow(const char* title, const char* default_image)
 {
-    createFullscreenWindow(title, &_window);
-    createVulkanInstance(&_vk.instance);
-    createVulkanSurface(&_vk.surface);
-    findPhysicalDevice(&_vk.physical_device, &_vk.q_family_index);
+    ////createFullscreenWindow(title, &_window);
+    //createVulkanInstance(&_vk.instance);
+    //createVulkanSurface(&_vk.surface);
+    //findPhysicalDevice(&_vk.physical_device, &_vk.q_family_index);
 
-    _is_stereo = hasStereo3dCapability();
-    printf("Vulkan360> Info: creating %s window\n", _is_stereo ? "Stereo 3D" : "standard");
+    //_is_stereo = hasStereo3dCapability();
+    //printf("Vulkan360> Info: creating %s window\n", _is_stereo ? "Stereo 3D" : "standard");
 
-    createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
-    createSwapChain(&_vk.swapchain, &_vk.swapchain_images);
-    createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
-    createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
+    //createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
+    //createSwapChain(&_vk.swapchain, &_vk.swapchain_images);
+    //createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
+    //createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
 
-    int w, h, ch;
-    uint8_t* pixels = stbi_load(default_image, &w, &h, &ch, 4);
-    printf("Read in image: %dx%d, %p\n", w, h, pixels);
+    //int w, h, ch;
+    //uint8_t* pixels = stbi_load(default_image, &w, &h, &ch, 4);
+    //printf("Read in image: %dx%d, %p\n", w, h, pixels);
 
-    // TODO: return -1 if any of the above fails
+    //// TODO: return -1 if any of the above fails
 
     return 0;
 }
@@ -186,130 +199,130 @@ void Vulkan360::swapBuffers(uint32_t buffer_idx)
     vkQueuePresentKHR(_vk.queue, &present_info);
 }
 
-bool Vulkan360::shouldClose()
-{
-    return glfwWindowShouldClose(_window);
-}
-
-void Vulkan360::pollEvents()
-{
-    glfwPollEvents();
-
-    if (glfwGetKey(_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-    {
-        glfwSetWindowShouldClose(_window, true);
-    }
-}
+//bool Vulkan360::shouldClose()
+//{
+//    return glfwWindowShouldClose(_window);
+//}
+//
+//void Vulkan360::pollEvents()
+//{
+//    glfwPollEvents();
+//
+//    if (glfwGetKey(_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+//    {
+//        glfwSetWindowShouldClose(_window, true);
+//    }
+//}
 
 ///////////////////////////////////////////////////////////////
 //   PRIVATE METHODS                                         //
 ///////////////////////////////////////////////////////////////
 
-void Vulkan360::readDisplayConfig(const char* config_filename)
-{
-    _config.load_success = true;
+//void Vulkan360::readDisplayConfig(const char* config_filename)
+//{
+//    _config.load_success = true;
+//
+//    std::ifstream config_file(config_filename);
+//    if (!config_file.is_open())
+//    {
+//        fprintf(stderr, "Vulkan360> Error: config file '%s' not found'\n", config_filename);
+//        return;
+//    }
+//
+//    std::string line;
+//    int lineno = 0;
+//    while (std::getline(config_file, line))
+//    {
+//        if (lineno == 0 && line != "OmniSurface Config")
+//        {
+//            fprintf(stderr, "Vulkan360> Error: config file format not recognized - 1st line should be 'OmniSurface Config'\n");
+//            _config.load_success = false;
+//        }
+//        else if (line.length() >= 13 && line.substr(0, 12) == "Base Shape: ")
+//        {
+//            std::string shape = line.substr(12);
+//            if (shape == "plane")
+//            {
+//                _config.base_shape = DisplayBaseShape::BASE_SHAPE_PLANE;
+//            }
+//            else if (shape == "cylinder")
+//            {
+//                _config.base_shape = DisplayBaseShape::BASE_SHAPE_CYLINDER;
+//            }
+//            else
+//            {
+//                fprintf(stderr, "Vulkan360> Error: config file format not recognized - Base Shape must be 'plane' or 'cylinder'\n");
+//                _config.load_success = false;
+//            }
+//        }
+//        else if (line.length() >= 9 && line.substr(0, 8) == "Facets: ")
+//        {
+//            _config.facets = std::stoul(line.substr(8));
+//        }
+//        else if (line.length() >= 9 && line.substr(0, 8) == "Radius: ")
+//        {
+//            _config.radius = std::stod(line.substr(8));
+//        }
+//        else if (line.length() >= 9 && line.substr(0, 8) == "Height: ")
+//        {
+//            _config.height = std::stod(line.substr(8));
+//        }
+//        else if (line.length() >= 13 && line.substr(0, 12) == "Resolution: ")
+//        {
+//            std::string size = line.substr(12);
+//            size_t delim = size.find("x");
+//            if (delim == std::string::npos)
+//            {
+//                fprintf(stderr, "Vulkan360> Error: config file format not recognized - Resolution should be WIDTHxHEIGHT\n");
+//                _config.load_success = false;
+//            }
+//            else
+//            {
+//                _config.resolution_w = std::stoul(size.substr(0, delim));
+//                _config.resolution_h = std::stoul(size.substr(delim + 1));
+//            }
+//        }
+//
+//        lineno++;
+//    }
+//
+//    config_file.close();
+//}
+//
+//void Vulkan360::createFullscreenWindow(const char* title, GLFWwindow** window_ptr)
+//{
+//    if (!glfwInit())
+//    {
+//        fprintf(stderr, "Vulkan360> Error: failed to initialize GLFW\n");
+//        *window_ptr = nullptr;
+//    }
+//
+//    // Prevent GLFW from implicitly creating an OpenGL context
+//    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+//
+//    // Get primary monitor
+//    GLFWmonitor* primary_monitor = glfwGetPrimaryMonitor();
+//    if (!primary_monitor)
+//    {
+//        fprintf(stderr, "Vulkan360> Error: failed to find primary monitor\n");
+//        *window_ptr = nullptr;
+//    }
+//
+//    // Get resolution of primary monitor
+//    const GLFWvidmode* mode = glfwGetVideoMode(primary_monitor);
+//    _window_w = mode->width;
+//    _window_h = mode->height;
+//
+//    // Create fullscreen window
+//    *window_ptr = glfwCreateWindow(_window_w, _window_h, title, primary_monitor, nullptr);
+//    if (!(*window_ptr))
+//    {
+//        fprintf(stderr, "Vulkan360> Error: could not create `GLFWwindow`\n");
+//        *window_ptr = nullptr;
+//    }
+//}
 
-    std::ifstream config_file(config_filename);
-    if (!config_file.is_open())
-    {
-        fprintf(stderr, "Vulkan360> Error: config file '%s' not found'\n", config_filename);
-        return;
-    }
-
-    std::string line;
-    int lineno = 0;
-    while (std::getline(config_file, line))
-    {
-        if (lineno == 0 && line != "OmniSurface Config")
-        {
-            fprintf(stderr, "Vulkan360> Error: config file format not recognized - 1st line should be 'OmniSurface Config'\n");
-            _config.load_success = false;
-        }
-        else if (line.length() >= 13 && line.substr(0, 12) == "Base Shape: ")
-        {
-            std::string shape = line.substr(12);
-            if (shape == "plane")
-            {
-                _config.base_shape = DisplayBaseShape::BASE_SHAPE_PLANE;
-            }
-            else if (shape == "cylinder")
-            {
-                _config.base_shape = DisplayBaseShape::BASE_SHAPE_CYLINDER;
-            }
-            else
-            {
-                fprintf(stderr, "Vulkan360> Error: config file format not recognized - Base Shape must be 'plane' or 'cylinder'\n");
-                _config.load_success = false;
-            }
-        }
-        else if (line.length() >= 9 && line.substr(0, 8) == "Facets: ")
-        {
-            _config.facets = std::stoul(line.substr(8));
-        }
-        else if (line.length() >= 9 && line.substr(0, 8) == "Radius: ")
-        {
-            _config.radius = std::stod(line.substr(8));
-        }
-        else if (line.length() >= 9 && line.substr(0, 8) == "Height: ")
-        {
-            _config.height = std::stod(line.substr(8));
-        }
-        else if (line.length() >= 13 && line.substr(0, 12) == "Resolution: ")
-        {
-            std::string size = line.substr(12);
-            size_t delim = size.find("x");
-            if (delim == std::string::npos)
-            {
-                fprintf(stderr, "Vulkan360> Error: config file format not recognized - Resolution should be WIDTHxHEIGHT\n");
-                _config.load_success = false;
-            }
-            else
-            {
-                _config.resolution_w = std::stoul(size.substr(0, delim));
-                _config.resolution_h = std::stoul(size.substr(delim + 1));
-            }
-        }
-
-        lineno++;
-    }
-
-    config_file.close();
-}
-
-void Vulkan360::createFullscreenWindow(const char* title, GLFWwindow** window_ptr)
-{
-    if (!glfwInit())
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to initialize GLFW\n");
-        *window_ptr = nullptr;
-    }
-
-    // Prevent GLFW from implicitly creating an OpenGL context
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-
-    // Get primary monitor
-    GLFWmonitor* primary_monitor = glfwGetPrimaryMonitor();
-    if (!primary_monitor)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to find primary monitor\n");
-        *window_ptr = nullptr;
-    }
-
-    // Get resolution of primary monitor
-    const GLFWvidmode* mode = glfwGetVideoMode(primary_monitor);
-    _window_w = mode->width;
-    _window_h = mode->height;
-
-    // Create fullscreen window
-    *window_ptr = glfwCreateWindow(_window_w, _window_h, title, primary_monitor, nullptr);
-    if (!(*window_ptr))
-    {
-        fprintf(stderr, "Vulkan360> Error: could not create `GLFWwindow`\n");
-        *window_ptr = nullptr;
-    }
-}
-
-void Vulkan360::createVulkanInstance(VkInstance* instance_ptr)
+void Vulkan360::createVulkanInstance(const char** exts, uint32_t ext_count, VkInstance* instance_ptr)
 {
     VkApplicationInfo app_info{};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -319,11 +332,9 @@ void Vulkan360::createVulkanInstance(VkInstance* instance_ptr)
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.apiVersion = VK_API_VERSION_1_3;
 
-    uint32_t glfw_ext_count = 0;
     bool has_debug_util_ext = false;
     bool has_physical_dev_prop2_ext = false;
-    const char** glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_ext_count);
-    std::vector<const char*> extensions(glfw_extensions, glfw_extensions + glfw_ext_count);
+    std::vector<const char*> extensions(exts, exts + ext_count);
     for (int i = 0; i < extensions.size(); i++)
     {
         if (strcmp(extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) has_debug_util_ext = true;
@@ -367,13 +378,40 @@ void Vulkan360::createVulkanInstance(VkInstance* instance_ptr)
     }
 }
 
-void Vulkan360::createVulkanSurface(VkSurfaceKHR* surface_ptr)
+void Vulkan360::createVulkanSurface(void* w_handle, void* m_handle, VkSurfaceKHR* surface_ptr)
 {
-    if (glfwCreateWindowSurface(_vk.instance, _window, nullptr, surface_ptr) != VK_SUCCESS)
+#if defined(_WIN32)
+    HWND hwnd = (HWND)w_handle;
+    HMODULE hmod = (HMODULE)m_handle;
+
+    VkWin32SurfaceCreateInfoKHR create_surface_info{};
+    create_surface_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+    create_surface_info.hwnd = hwnd;
+    create_surface_info.hinstance = hmod;
+
+    if (vkCreateWin32SurfaceKHR(_vk.instance, &create_surface_info, nullptr, surface_ptr) != VK_SUCCESS)
     {
         fprintf(stderr, "Vulkan360> Error: could not create `VkSurfaceKHR`\n");
         *surface_ptr = VK_NULL_HANDLE;
     }
+
+#elif defined(__linux__)
+    Window x11_window = (Window)w_handle;
+    Display* x11_display = (Display*)m_handle;
+
+    VkXlibSurfaceCreateInfoKHR create_surface_info{};
+    create_surface_info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+    create_surface_info.window = x11_window;
+    create_surface_info.dpy = x11_display;
+
+    if (vkCreateXlibSurfaceKHR(instance, &create_surface_info, nullptr, surface_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: could not create `VkSurfaceKHR`\n");
+        *surface_ptr = VK_NULL_HANDLE;
+    }
+#else
+    #error "Unsupported operating system"
+#endif
 }
 
 void Vulkan360::findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr)
@@ -408,6 +446,13 @@ void Vulkan360::findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q
     if (*physical_device_ptr == VK_NULL_HANDLE)
     {
         fprintf(stderr, "Vulkan360> Error: could not find target GPU device\n");
+    }
+    else
+    {
+        VkPhysicalDeviceProperties device_props;
+        vkGetPhysicalDeviceProperties(*physical_device_ptr, &device_props);
+
+        printf("Vulkan360> Info: Using GPU Device %s\n", device_props.deviceName);
     }
     if (*q_fam_idx_ptr < 0)
     {
@@ -519,7 +564,8 @@ void Vulkan360::createSwapChain(VkSwapchainKHR* swapchain_ptr, std::vector<VkIma
     vkGetPhysicalDeviceSurfacePresentModesKHR(_vk.physical_device, _vk.surface, &present_mode_count, present_modes.data());
 
     VkSurfaceFormatKHR surface_format = chooseSwapSurfaceFormat(formats);
-    VkExtent2D extent = chooseSwapExtent(capabilities, _window_w, _window_h);
+    //VkExtent2D extent = chooseSwapExtent(capabilities, _window_w, _window_h);
+    VkExtent2D extent = chooseSwapExtent(capabilities, 1024, 768); // TODO: fix!
 
     uint32_t img_count = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0 && img_count > capabilities.maxImageCount)
@@ -589,7 +635,7 @@ VkSurfaceFormatKHR Vulkan360::chooseSwapSurfaceFormat(const std::vector<VkSurfac
 
 VkExtent2D Vulkan360::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height)
 {
-    if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max())
+    if (capabilities.currentExtent.width != (std::numeric_limits<uint32_t>::max)())
     {
         return capabilities.currentExtent;
     }

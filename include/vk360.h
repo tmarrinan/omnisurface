@@ -1,23 +1,16 @@
 #pragma once
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
 #include <cstdint>
 #include <vector>
-//#include <vulkan/vulkan.h>
+#if defined(_WIN32)
+#define VK_USE_PLATFORM_WIN32_KHR
+#elif defined(__linux__)
+#define VK_USE_PLATFORM_XLIB_KHR
+#endif
+#include <vulkan/vulkan.h>
 //#include "native_render_handle.h"
 
 class Vulkan360 {
 private:
-    enum DisplayBaseShape : uint8_t { BASE_SHAPE_PLANE, BASE_SHAPE_CYLINDER };
-    struct Config {
-        bool load_success;
-        DisplayBaseShape base_shape;
-        uint32_t facets;
-        double radius;
-        double height;
-        uint32_t resolution_w;
-        uint32_t resolution_h;
-    };
     struct VulkanData {
         VkInstance instance;
         VkSurfaceKHR surface;
@@ -34,17 +27,13 @@ private:
         std::vector<VkImage> swapchain_images;
     };
 
-    Config _config;
-    GLFWwindow* _window;
-    uint32_t _window_w;
-    uint32_t _window_h;
     VulkanData _vk;
     bool _is_stereo;
 
-    void readDisplayConfig(const char* config_filename);
-    void createFullscreenWindow(const char* title, GLFWwindow** window_ptr);
-    void createVulkanInstance(VkInstance* instance_ptr);
-    void createVulkanSurface(VkSurfaceKHR* surface_ptr);
+    //void readDisplayConfig(const char* config_filename);
+    //void createFullscreenWindow(const char* title, GLFWwindow** window_ptr);
+    void createVulkanInstance(const char** exts, uint32_t ext_count, VkInstance* instance_ptr);
+    void createVulkanSurface(void* w_handle, void* m_handle, VkSurfaceKHR* surface_ptr);
     void findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr);
     int findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device);
     bool hasStereo3dCapability();
@@ -56,14 +45,13 @@ private:
     void createSyncObjects(VkSemaphore* img_available_ptr, VkSemaphore* img_finished_ptr, VkFence* in_flight_ptr);
 
 public:
-    Vulkan360(const char* config_filename);
+    Vulkan360(const char** exts, uint32_t ext_count, void* w_handle, void* m_handle);
     ~Vulkan360();
 
-    bool hasValidDisplayConfig();
     int initializeWindow(const char* title, const char* default_image);
     uint32_t getRenderBufferIndex();
     void drawFrame(uint32_t buffer_idx);
     void swapBuffers(uint32_t buffer_idx);
-    bool shouldClose();
-    void pollEvents();
+    //bool shouldClose();
+    //void pollEvents();
 };
