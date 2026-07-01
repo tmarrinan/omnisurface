@@ -16,12 +16,12 @@ GLAD (v2) -- [https://gen.glad.sh/](https://gen.glad.sh/)
 * gl: Version 4.6
 * Core
 * Extensions:
-    * `GL\_EXT\_memory\_object`
-    * `GL\_EXT\_memory\_object\_fd` (*Linux only)
-    * `GL\_EXT\_memory\_object\_win32` (*Windows only)
-    * `GL\_EXT\_semaphore`
-    * `GL\_EXT\_semaphore\_fd` (*Linux only)
-    * `GL\_EXT\_semaphore\_win32` (*Windows only)
+    * `GL_EXT_memory_object`
+    * `GL_EXT_memory_object_fd` (*Linux only)
+    * `GL_EXT_memory_object_win32` (*Windows only)
+    * `GL_EXT_semaphore`
+    * `GL_EXT_semaphore_fd` (*Linux only)
+    * `GL_EXT_semaphore_win32` (*Windows only)
 * Options (check the following):
     * loader
 
