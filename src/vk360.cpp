@@ -42,36 +42,31 @@ vk360::Vulkan360::~Vulkan360()
     // Clean up
 }
 
-#if defined(_WIN32)
-HANDLE vk360::Vulkan360::getExternalHandle(vk360::ExternalObjectType obj_type, uint64_t* mem_size)
+void vk360::Vulkan360::getExternalRenderBufferInfo(uint32_t index, ExternalImageInfo* ext_img)
 {
-    HANDLE handle = nullptr;
-#elif defined(__linux__)
-int getExternalHandle(vk360::ExternalObjectType obj_type, uint64_t* mem_size)
-{
-    int handle = -1;
-#endif
-    switch (obj_type)
-    {
-    case vk360::ExternalObjectType::RENDER_BUFFER_0:
-        handle = _vk.render_buffer[0].external_handle;
-        *mem_size = _vk.render_buffer[0].vk_img_data.mem_size;
-        break;
-    case vk360::ExternalObjectType::RENDER_BUFFER_1:
-        handle = _vk.render_buffer[1].external_handle;
-        *mem_size = _vk.render_buffer[1].vk_img_data.mem_size;
-        break;
-    case vk360::ExternalObjectType::AVAILABLE_SEMAPHORE:
-        handle = _vk.img_available.external_handle;
-        *mem_size = 0;
-        break;
-    case vk360::ExternalObjectType::FINISHED_SEMAPHORE:
-        handle = _vk.img_finished.external_handle;
-        *mem_size = 0;
-        break;
-    }
+    ext_img->external_handle = _vk.render_buffer[index].external_handle;
+    ext_img->memory_size = _vk.render_buffer[index].vk_img_data.mem_size;
+    ext_img->width = _vk.render_buffer[index].vk_img_data.width;
+    ext_img->height = _vk.render_buffer[index].vk_img_data.height;
+    ext_img->layers = _vk.render_buffer[index].vk_img_data.layers;
+}
 
-    return handle;
+#if defined(_WIN32)
+void vk360::Vulkan360::getExternalImageAvailableSemaphoreInfo(HANDLE* ext_handle)
+#elif defined(__linux__)
+void vk360::Vulkan360::getExternalImageAvailableSemaphoreInfo(int* ext_handle)
+#endif
+{
+    *ext_handle = _vk.img_available.external_handle;
+}
+
+#if defined(_WIN32)
+void vk360::Vulkan360::getExternalImageFinishedSemaphoreInfo(HANDLE* ext_handle)
+#elif defined(__linux__)
+void vk360::Vulkan360::getExternalImageFinishedSemaphoreInfo(int* ext_handle)
+#endif
+{
+    *ext_handle = _vk.img_finished.external_handle;
 }
 
 void vk360::Vulkan360::drawFrame(uint32_t buffer_idx)
@@ -255,13 +250,6 @@ void vk360::Vulkan360::findPhysicalDevice(uint8_t* device_uuid, VkPhysicalDevice
     if (*physical_device_ptr == VK_NULL_HANDLE)
     {
         fprintf(stderr, "Vulkan360> Error: could not find target GPU device\n");
-    }
-    else
-    {
-        VkPhysicalDeviceProperties device_props;
-        vkGetPhysicalDeviceProperties(*physical_device_ptr, &device_props);
-
-        printf("Vulkan360> Info: Using GPU Device %s\n", device_props.deviceName);
     }
     if (*q_fam_idx_ptr < 0)
     {
@@ -530,6 +518,9 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
 
     ext_img->vk_img_data.mem_size = mem_reqs.size;
     ext_img->vk_img_data.format = format;
+    ext_img->vk_img_data.width = width;
+    ext_img->vk_img_data.height = height;
+    ext_img->vk_img_data.layers = layers;
 
     transitionImageLayoutToGeneral(ext_img->vk_img_data.image, ext_img->vk_img_data.format);
 }

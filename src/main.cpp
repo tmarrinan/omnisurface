@@ -42,7 +42,8 @@ struct PresentData {
 // Function definitions
 bool readOmniSurfaceConfigFile(const char* filename, DisplayConfig* config_ptr);
 GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* width, int* height, bool* is_stereo);
-void importExternalTextureArray(ExternalHandle ext_handle, uint64_t mem_size, GLuint* texture);
+void importExternalTextureArray(vk360::ExternalImageInfo& ext_img_info, GLuint* texture);
+void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore);
 
 // Main program
 int main()
@@ -82,12 +83,20 @@ int main()
     vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, is_stereo);
 
     // Import external data to OpenGL for framebuffer presentation
+    vk360::ExternalImageInfo render_buffer_info[2];
+    app->getExternalRenderBufferInfo(0, &(render_buffer_info[0]));
+    app->getExternalRenderBufferInfo(1, &(render_buffer_info[1]));
+    ExternalHandle img_available_handle, img_finished_handle;
+    app->getExternalImageAvailableSemaphoreInfo(&img_available_handle);
+    app->getExternalImageFinishedSemaphoreInfo(&img_finished_handle);
+
     PresentData present;
-    uint64_t size_render_buf0, size_render_buf1;
-    ExternalHandle ext_render_buf0 = app->getExternalHandle(vk360::RENDER_BUFFER_0, &size_render_buf0);
-    ExternalHandle ext_render_buf1 = app->getExternalHandle(vk360::RENDER_BUFFER_1, &size_render_buf1);
-    importExternalTextureArray(ext_render_buf0, size_render_buf0, &(present.render_buffers[0]));
-    importExternalTextureArray(ext_render_buf1, size_render_buf1, &(present.render_buffers[1]));
+    importExternalTextureArray(render_buffer_info[0], &(present.render_buffers[0]));
+    importExternalTextureArray(render_buffer_info[1], &(present.render_buffers[1]));
+    importExternalSemaphore(img_available_handle, &(present.img_available_sem));
+    importExternalSemaphore(img_finished_handle, &(present.img_finished_sem));
+
+    printf("gl errors: %d\n", glGetError());
 
     // Main render loop
     while (!glfwWindowShouldClose(window))
@@ -228,29 +237,30 @@ GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* widt
     return window;
 }
 
-void importExternalTextureArray(ExternalHandle ext_handle, uint64_t mem_size, GLuint* texture)
+void importExternalTextureArray(vk360::ExternalImageInfo& ext_img_info, GLuint* texture)
 {
     GLuint mem_obj;
     glCreateMemoryObjectsEXT(1, &mem_obj);
 #if defined(_WIN32)
-    glImportMemoryWin32HandleEXT(mem_obj, mem_size, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, ext_handle);
+    glImportMemoryWin32HandleEXT(mem_obj, ext_img_info.memory_size, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, ext_img_info.external_handle);
 #elif defined(__linux__)
-    glImportMemoryFdEXT(mem_obj, mem_size, GL_HANDLE_TYPE_OPAQUE_FD_EXT, ext_handle);
+    glImportMemoryFdEXT(mem_obj, ext_img_info.memory_size, GL_HANDLE_TYPE_OPAQUE_FD_EXT, ext_img_info.external_handle);
 #endif
 
     glGenTextures(1, texture);
     glBindTexture(GL_TEXTURE_2D_ARRAY, *texture);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_TILING_EXT, GL_OPTIMAL_TILING_EXT);
-    //glTexStorageMem3DEXT(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, width, height, layers, mem_obj, 0);
+    glTexStorageMem3DEXT(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, ext_img_info.width, ext_img_info.height, ext_img_info.layers, mem_obj, 0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 }
 
-// Import the FD for OpenGL version of the shared semaphore
-//air::glGenSemaphoresEXT(1, opengl_semaphore);
-//#ifdef _WIN32
-//air::glImportSemaphoreWin32HandleEXT(*opengl_semaphore,
-//    GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, sem_handle);
-//#else
-//air::glImportSemaphoreFdEXT(*opengl_semaphore,
-//    GL_HANDLE_TYPE_OPAQUE_FD_EXT, sem_fd);
-//#endif
+void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore)
+{
+    // Import the FD for OpenGL version of the shared semaphore
+    glGenSemaphoresEXT(1, semaphore);
+#if defined(_WIN32)
+    glImportSemaphoreWin32HandleEXT(*semaphore, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, sem_handle);
+#elif defined(__linux__)
+    glImportSemaphoreFdEXT(*semaphore, GL_HANDLE_TYPE_OPAQUE_FD_EXT, sem_handle);
+#endif
+}

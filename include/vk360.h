@@ -14,13 +14,26 @@
 
 
 namespace vk360 {
-    enum ExternalObjectType : uint8_t { RENDER_BUFFER_0, RENDER_BUFFER_1, AVAILABLE_SEMAPHORE, FINISHED_SEMAPHORE };
+    struct ExternalImageInfo {
+#if defined(_WIN32)
+        HANDLE external_handle = nullptr;
+#elif defined(__linux__)
+        int external_handle = 0;
+#endif
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t layers = 0;
+        uint64_t memory_size = 0;
+    };
     struct VulkanImageData {
         VkImage image = VK_NULL_HANDLE;
         VkImageView view = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
         VkFormat format = VK_FORMAT_UNDEFINED;
         uint64_t mem_size = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t layers = 0;
     };
     struct VulkanInteropImage {
         VulkanImageData vk_img_data;
@@ -78,10 +91,13 @@ namespace vk360 {
         Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo);
         ~Vulkan360();
 
+        void getExternalRenderBufferInfo(uint32_t index, ExternalImageInfo* ext_img);
 #if defined(_WIN32)
-        HANDLE getExternalHandle(ExternalObjectType obj_type, uint64_t* mem_size);
+        void getExternalImageAvailableSemaphoreInfo(HANDLE* ext_handle);
+        void getExternalImageFinishedSemaphoreInfo(HANDLE* ext_handle);
 #elif defined(__linux__)
-        int getExternalHandle(ExternalObjectType obj_type, uint64_t* mem_size);
+        void getExternalImageAvailableSemaphoreInfo(int* ext_handle);
+        void getExternalImageFinishedSemaphoreInfo(int* ext_handle);
 #endif
         void drawFrame(uint32_t buffer_idx);
     };

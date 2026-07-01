@@ -12,7 +12,6 @@ CMake [https://cmake.org/download/](https://cmake.org/download/)
 * Download/Install 'Latest Release'
 
 GLAD (v2) -- [https://gen.glad.sh/](https://gen.glad.sh/)
-* egl: Version 1.5
 * gl: Version 4.6
 * Core
 * Extensions:
