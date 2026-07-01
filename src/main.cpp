@@ -1,30 +1,48 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-#include <GL/glcorearb.h>
+#include <glad/gl.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+extern "C" {
+    _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;       // Forces NVIDIA Performance GPU
+    _declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1; // Forces AMD Performance GPU
+}
+#endif
 
 #include "vk360.h"
 
 
-// OpenGL extension functions
-PFNGLGETBOOLEANVPROC glGetBooleanv = nullptr;
-
 // Data types
+#if defined(_WIN32)
+typedef HANDLE ExternalHandle;
+#elif defined(__linux__)
+typedef int ExternalHandle;
+#endif
+
 enum DisplayBaseShape : uint8_t { BASE_SHAPE_PLANE, BASE_SHAPE_CYLINDER };
 
-typedef struct DisplayConfig {
+struct DisplayConfig {
     int monitor_index;
     DisplayBaseShape base_shape;
     uint32_t facets;
     double radius;
     double height;
-} DisplayConfig;
+};
+
+struct PresentData {
+    GLuint render_buffers[2];
+    GLuint img_available_sem;
+    GLuint img_finished_sem;
+};
 
 // Function definitions
 bool readOmniSurfaceConfigFile(const char* filename, DisplayConfig* config_ptr);
 GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* width, int* height, bool* is_stereo);
+void importExternalTextureArray(ExternalHandle ext_handle, uint64_t mem_size, GLuint* texture);
 
 // Main program
 int main()
@@ -48,23 +66,28 @@ int main()
     }
     printf("OmniSurface> Info: Launching %s window on monitor %d with resolution %dx%d\n",
         is_stereo ? "Stereo 3D" : "Standard 2D", config.monitor_index, window_w, window_h);
-    
-//    // Get native window handle
-//#if defined (_WIN32)
-//    HWND win_handle = glfwGetWin32Window(window);
-//    HMODULE m_handle = GetModuleHandle(nullptr);
-//#elif defined(__linux__)
-//    Window win_handle = glfwGetX11Window(window);
-//    Display* m_handle = glfwGetX11Display();
-//#else
-//    #error "Unsupported operating system"
-//#endif
-//
-//    // Setup Vulkan 360 renderer
-//    uint32_t glfw_ext_count = 0;
-//    const char** glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_ext_count);
-//    Vulkan360* app = new Vulkan360(glfw_extensions, glfw_ext_count, win_handle, m_handle);
-//    //glfwCreateWindowSurface()
+
+    // Query the GPU name and UUID from the active OpenGL context
+    const GLubyte* renderer = glGetString(GL_RENDERER);
+    GLubyte gl_device_uuid[GL_UUID_SIZE_EXT];
+    glGetUnsignedBytevEXT(GL_DEVICE_UUID_EXT, gl_device_uuid);
+    printf("OmniSurface> Info: Using %s (UUID=%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x)\n",
+        renderer,
+        gl_device_uuid[0],  gl_device_uuid[1],  gl_device_uuid[2],  gl_device_uuid[3],
+        gl_device_uuid[4],  gl_device_uuid[5],  gl_device_uuid[6],  gl_device_uuid[7],
+        gl_device_uuid[8],  gl_device_uuid[9],  gl_device_uuid[10], gl_device_uuid[11],
+        gl_device_uuid[12], gl_device_uuid[13], gl_device_uuid[14], gl_device_uuid[15]);
+
+    // Setup Vulkan 360 renderer
+    vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, is_stereo);
+
+    // Import external data to OpenGL for framebuffer presentation
+    PresentData present;
+    uint64_t size_render_buf0, size_render_buf1;
+    ExternalHandle ext_render_buf0 = app->getExternalHandle(vk360::RENDER_BUFFER_0, &size_render_buf0);
+    ExternalHandle ext_render_buf1 = app->getExternalHandle(vk360::RENDER_BUFFER_1, &size_render_buf1);
+    importExternalTextureArray(ext_render_buf0, size_render_buf0, &(present.render_buffers[0]));
+    importExternalTextureArray(ext_render_buf1, size_render_buf1, &(present.render_buffers[1]));
 
     // Main render loop
     while (!glfwWindowShouldClose(window))
@@ -78,25 +101,6 @@ int main()
             glfwSetWindowShouldClose(window, true);
         }
     }
-
-    //Vulkan360* app = new Vulkan360("resrc/config_plane.txt");
-    //if (!app->hasValidDisplayConfig())
-    //{
-    //    fprintf(stderr, "Error: Vulkan360 could not read display config file\n");
-    //    return EXIT_FAILURE;
-    //}
-    //printf("OmniSurface Vulkan360 display config read in.\n");
-    //app->initializeWindow("OmniSurface", "resrc/images/SampleOmni3D.png");
-
-    //while (!app->shouldClose())
-    //{
-    //    app->pollEvents();
-    //    // TODO: process events here
-
-    //    int buffer_idx = app->getRenderBufferIndex();
-    //    app->drawFrame(buffer_idx);
-    //    app->swapBuffers(buffer_idx);
-    //}
 
     return EXIT_SUCCESS;
 }
@@ -210,7 +214,11 @@ GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* widt
     glfwMakeContextCurrent(window);
 
     // Load OpenGL extensions
-    glGetBooleanv = (PFNGLGETBOOLEANVPROC)glfwGetProcAddress("glGetBooleanv");
+    if (gladLoadGL(glfwGetProcAddress) == 0)
+    {
+        fprintf(stderr, "OmniSurface> Error: failed to initialize Glad\n");
+        return nullptr;
+    }
 
     // Check whether window is quad-buffer stereo capable
     GLboolean stereo_support;
@@ -219,3 +227,30 @@ GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* widt
 
     return window;
 }
+
+void importExternalTextureArray(ExternalHandle ext_handle, uint64_t mem_size, GLuint* texture)
+{
+    GLuint mem_obj;
+    glCreateMemoryObjectsEXT(1, &mem_obj);
+#if defined(_WIN32)
+    glImportMemoryWin32HandleEXT(mem_obj, mem_size, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, ext_handle);
+#elif defined(__linux__)
+    glImportMemoryFdEXT(mem_obj, mem_size, GL_HANDLE_TYPE_OPAQUE_FD_EXT, ext_handle);
+#endif
+
+    glGenTextures(1, texture);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, *texture);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_TILING_EXT, GL_OPTIMAL_TILING_EXT);
+    //glTexStorageMem3DEXT(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, width, height, layers, mem_obj, 0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+}
+
+// Import the FD for OpenGL version of the shared semaphore
+//air::glGenSemaphoresEXT(1, opengl_semaphore);
+//#ifdef _WIN32
+//air::glImportSemaphoreWin32HandleEXT(*opengl_semaphore,
+//    GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, sem_handle);
+//#else
+//air::glImportSemaphoreFdEXT(*opengl_semaphore,
+//    GL_HANDLE_TYPE_OPAQUE_FD_EXT, sem_fd);
+//#endif

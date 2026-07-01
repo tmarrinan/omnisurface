@@ -5,20 +5,32 @@ project(omnisurface LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(GL_HEADERS_DIR "" CACHE PATH "Optional local directory containing OpenGL development headers")
+set(GLAD_DIR "" CACHE PATH "Local directory containing GLAD include and lib development files")
 
+
+# Find Vulkan and GLFW
 find_package(Vulkan REQUIRED)
-find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 
-add_executable(${PROJECT_NAME})
 
-if(GL_HEADERS_DIR)
-    if(EXISTS "${GL_HEADERS_DIR}")
-        # Add it as BEFORE so it overrides system-installed paths if duplicates exist
-        target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${GL_HEADERS_DIR}")
-    endif()
+# Add local Glad library
+add_library(GLAD STATIC IMPORTED GLOBAL)
+
+target_include_directories(GLAD INTERFACE "${GLAD_DIR}/include")
+
+if(WIN32)
+    set_target_properties(GLAD PROPERTIES
+        IMPORTED_LOCATION "${GLAD_DIR}/lib/glad.lib"
+    )
+elseif(UNIX)
+    set_target_properties(GLAD PROPERTIES
+        IMPORTED_LOCATION "${GLAD_DIR}/lib/libglad.a"
+    )
 endif()
+
+
+# Main project
+add_executable(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -50,11 +62,10 @@ else()
     )
 endif()
 
-
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vulkan::Vulkan
-    OpenGL::GL
     glfw
+    GLAD
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

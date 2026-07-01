@@ -1,57 +1,88 @@
 #pragma once
 #include <cstdint>
 #include <vector>
-#if defined(_WIN32)
-#define VK_USE_PLATFORM_WIN32_KHR
-#elif defined(__linux__)
-#define VK_USE_PLATFORM_XLIB_KHR
-#endif
-#include <vulkan/vulkan.h>
-//#include "native_render_handle.h"
 
-class Vulkan360 {
-private:
-    struct VulkanData {
-        VkInstance instance;
-        VkSurfaceKHR surface;
-        VkPhysicalDevice physical_device;
-        int q_family_index;
-        VkDevice device;
-        VkQueue queue;
-        VkSwapchainKHR swapchain;
-        VkCommandPool pool;
-        VkCommandBuffer cmd;
-        VkSemaphore img_available;
-        VkSemaphore img_finished;
-        VkFence in_flight;
-        std::vector<VkImage> swapchain_images;
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#define VK_USE_PLATFORM_WIN32_KHR
+#endif
+
+#include <vulkan/vulkan.h>
+
+
+namespace vk360 {
+    enum ExternalObjectType : uint8_t { RENDER_BUFFER_0, RENDER_BUFFER_1, AVAILABLE_SEMAPHORE, FINISHED_SEMAPHORE };
+    struct VulkanImageData {
+        VkImage image = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        uint64_t mem_size = 0;
+    };
+    struct VulkanInteropImage {
+        VulkanImageData vk_img_data;
+#if defined(_WIN32)
+        HANDLE external_handle = nullptr;
+#elif defined(__linux__)
+        int external_handle = 0;
+#endif
+    };
+    struct VulkanInteropSemaphore {
+        VkSemaphore semaphore;
+#if defined(_WIN32)
+        HANDLE external_handle = nullptr;
+#elif defined(__linux__)
+        int external_handle = 0;
+#endif
     };
 
-    VulkanData _vk;
-    bool _is_stereo;
+    class Vulkan360 {
+    private:
+        struct VulkanData {
+            VkInstance instance;
+            VkPhysicalDevice physical_device;
+            int q_family_index;
+            VkDevice device;
+            VkQueue queue;
+            VkCommandPool pool;
+            VkCommandBuffer cmd;
+            VulkanInteropSemaphore img_available;
+            VulkanInteropSemaphore img_finished;
+            VkFence in_flight;
+            VulkanInteropImage render_buffer[2];
+        };
 
-    //void readDisplayConfig(const char* config_filename);
-    //void createFullscreenWindow(const char* title, GLFWwindow** window_ptr);
-    void createVulkanInstance(const char** exts, uint32_t ext_count, VkInstance* instance_ptr);
-    void createVulkanSurface(void* w_handle, void* m_handle, VkSurfaceKHR* surface_ptr);
-    void findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr);
-    int findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device);
-    bool hasStereo3dCapability();
-    void createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_ptr);
-    void createSwapChain(VkSwapchainKHR* swapchain_ptr, std::vector<VkImage>* swapchain_images_ptr);
-    VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& available_formats);
-    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height);
-    void createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr);
-    void createSyncObjects(VkSemaphore* img_available_ptr, VkSemaphore* img_finished_ptr, VkFence* in_flight_ptr);
+        VulkanData _vk;
+        uint32_t _width;
+        uint32_t _height;
+        bool _is_stereo;
 
-public:
-    Vulkan360(const char** exts, uint32_t ext_count, void* w_handle, void* m_handle);
-    ~Vulkan360();
+        void createVulkanInstance(VkInstance* instance_ptr);
+        void findPhysicalDevice(uint8_t* device_uuid, VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr);
+        int findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device);
+        void createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_ptr);
+        void createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr);
+        void createSyncObjects(VulkanInteropSemaphore* img_available_ptr, VulkanInteropSemaphore* img_finished_ptr, VkFence* in_flight_ptr);
+        void createExternalSemaphore(VulkanInteropSemaphore* ext_sem);
+        void createExternalImage(uint32_t width, uint32_t height, uint32_t layers, VkFormat format, VulkanInteropImage* ext_img);
+        int findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
+        void transitionImageLayoutToGeneral(VkImage image, VkFormat format);
+        void recordImageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+            uint32_t src_queue_family, uint32_t dest_queue_family, VkAccessFlags src_access, VkAccessFlags dst_access,
+            VkImageAspectFlags aspect_flags, VkPipelineStageFlags src_stage, VkPipelineStageFlags dest_stage);
 
-    int initializeWindow(const char* title, const char* default_image);
-    uint32_t getRenderBufferIndex();
-    void drawFrame(uint32_t buffer_idx);
-    void swapBuffers(uint32_t buffer_idx);
-    //bool shouldClose();
-    //void pollEvents();
-};
+    public:
+        Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo);
+        ~Vulkan360();
+
+#if defined(_WIN32)
+        HANDLE getExternalHandle(ExternalObjectType obj_type, uint64_t* mem_size);
+#elif defined(__linux__)
+        int getExternalHandle(ExternalObjectType obj_type, uint64_t* mem_size);
+#endif
+        void drawFrame(uint32_t buffer_idx);
+    };
+}

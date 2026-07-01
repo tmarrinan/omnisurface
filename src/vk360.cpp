@@ -1,30 +1,19 @@
-#include "vk360.h"
-
 #include <iostream>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <fstream>
 #include <algorithm>
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#include <vulkan/vulkan_win32.h>
-#elif defined(__linux__)
-#include <X11/Xlib.h>
-#include <vulkan/vulkan_xlib.h>
-#endif
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#include "vk360.h"
 
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
     VkDebugUtilsMessageTypeFlagsEXT message_type, const VkDebugUtilsMessengerCallbackDataEXT* callback_data, void* user_data)
 {
-    // Filter out unwanted messages (e.g., only show warnings and errors)
+    // Filter out unwanted messages (only show warnings and errors)
     if (message_severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
     {
         fprintf(stderr, "[VULKAN VALIDATION] %s\n", callback_data->pMessage);
@@ -35,65 +24,60 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 }
 
 
-Vulkan360::Vulkan360(const char** exts, uint32_t ext_count, void* w_handle, void* m_handle) :
-    _is_stereo(false)
+vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo) :
+    _width{ width }, _height{ height }, _is_stereo{ is_stereo }
+    
 {
-    createVulkanInstance(exts, ext_count, &_vk.instance);
-    createVulkanSurface(w_handle, m_handle, &_vk.surface);
-    findPhysicalDevice(&_vk.physical_device, &_vk.q_family_index);
-    // TODO: check for stereo capability???
+    createVulkanInstance(&_vk.instance);
+    findPhysicalDevice(device_uuid, &_vk.physical_device, &_vk.q_family_index);
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
-    //createSwapChain(&_vk.swapchain, &_vk.swapchain_images);
     createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
-    //createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
+    createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
+    createExternalImage(_width, _height, _is_stereo ? 2 : 1, VK_FORMAT_R8G8B8A8_UNORM, &(_vk.render_buffer[0]));
+    createExternalImage(_width, _height, _is_stereo ? 2 : 1, VK_FORMAT_R8G8B8A8_UNORM, &(_vk.render_buffer[1]));
 }
 
-Vulkan360::~Vulkan360()
+vk360::Vulkan360::~Vulkan360()
 {
     // Clean up
 }
 
-int Vulkan360::initializeWindow(const char* title, const char* default_image)
+#if defined(_WIN32)
+HANDLE vk360::Vulkan360::getExternalHandle(vk360::ExternalObjectType obj_type, uint64_t* mem_size)
 {
-    ////createFullscreenWindow(title, &_window);
-    //createVulkanInstance(&_vk.instance);
-    //createVulkanSurface(&_vk.surface);
-    //findPhysicalDevice(&_vk.physical_device, &_vk.q_family_index);
+    HANDLE handle = nullptr;
+#elif defined(__linux__)
+int getExternalHandle(vk360::ExternalObjectType obj_type, uint64_t* mem_size)
+{
+    int handle = -1;
+#endif
+    switch (obj_type)
+    {
+    case vk360::ExternalObjectType::RENDER_BUFFER_0:
+        handle = _vk.render_buffer[0].external_handle;
+        *mem_size = _vk.render_buffer[0].vk_img_data.mem_size;
+        break;
+    case vk360::ExternalObjectType::RENDER_BUFFER_1:
+        handle = _vk.render_buffer[1].external_handle;
+        *mem_size = _vk.render_buffer[1].vk_img_data.mem_size;
+        break;
+    case vk360::ExternalObjectType::AVAILABLE_SEMAPHORE:
+        handle = _vk.img_available.external_handle;
+        *mem_size = 0;
+        break;
+    case vk360::ExternalObjectType::FINISHED_SEMAPHORE:
+        handle = _vk.img_finished.external_handle;
+        *mem_size = 0;
+        break;
+    }
 
-    //_is_stereo = hasStereo3dCapability();
-    //printf("Vulkan360> Info: creating %s window\n", _is_stereo ? "Stereo 3D" : "standard");
-
-    //createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
-    //createSwapChain(&_vk.swapchain, &_vk.swapchain_images);
-    //createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
-    //createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
-
-    //int w, h, ch;
-    //uint8_t* pixels = stbi_load(default_image, &w, &h, &ch, 4);
-    //printf("Read in image: %dx%d, %p\n", w, h, pixels);
-
-    //// TODO: return -1 if any of the above fails
-
-    return 0;
+    return handle;
 }
 
-uint32_t Vulkan360::getRenderBufferIndex()
-{
-    // Wait for the previous frame to finish on the GPU
-    vkWaitForFences(_vk.device, 1, &_vk.in_flight, VK_TRUE, UINT64_MAX);
-    vkResetFences(_vk.device, 1, &_vk.in_flight);
-
-    // Acquire the next available image from the swapchain
-    uint32_t img_idx;
-    vkAcquireNextImageKHR(_vk.device, _vk.swapchain, UINT64_MAX, _vk.img_available, VK_NULL_HANDLE, &img_idx);
-
-    return img_idx;
-}
-
-void Vulkan360::drawFrame(uint32_t buffer_idx)
+void vk360::Vulkan360::drawFrame(uint32_t buffer_idx)
 {
     // Record draw commands
-    VkImage current_image = _vk.swapchain_images[buffer_idx];
+    //VkImage current_image = _vk.swapchain_images[buffer_idx];
 
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -113,7 +97,7 @@ void Vulkan360::drawFrame(uint32_t buffer_idx)
     barrierToClear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrierToClear.srcAccessMask = 0;
     barrierToClear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrierToClear.image = current_image;
+    //barrierToClear.image = current_image;
     barrierToClear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     barrierToClear.subresourceRange.baseMipLevel = 0;
     barrierToClear.subresourceRange.levelCount = 1;
@@ -136,7 +120,7 @@ void Vulkan360::drawFrame(uint32_t buffer_idx)
     range.baseArrayLayer = 0;
     range.layerCount = _is_stereo ? 2 : 1; // Erase both stereo layers in tandem!
 
-    vkCmdClearColorImage(_vk.cmd, current_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
+    //vkCmdClearColorImage(_vk.cmd, current_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
 
     // --- BARRIER 2: Transition Image Layout back to Present Source ---
     VkImageMemoryBarrier barrierToPresent = barrierToClear;
@@ -161,9 +145,9 @@ void Vulkan360::drawFrame(uint32_t buffer_idx)
 
 
     // Submit your recorded drawing commands
-    VkSemaphore wait_semaphores[] = { _vk.img_available };
+    VkSemaphore wait_semaphores[] = { _vk.img_available.semaphore };
     VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSemaphore signal_semaphores[] = { _vk.img_finished };
+    VkSemaphore signal_semaphores[] = { _vk.img_finished.semaphore };
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -181,148 +165,10 @@ void Vulkan360::drawFrame(uint32_t buffer_idx)
     }
 }
 
-void Vulkan360::swapBuffers(uint32_t buffer_idx)
-{
-    // Present rendered image on swap chain
-    VkSwapchainKHR swapchains[] = { _vk.swapchain };
-    VkSemaphore signal_semaphores[] = { _vk.img_finished };
-
-    VkPresentInfoKHR present_info{};
-    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = signal_semaphores;
-    present_info.swapchainCount = 1;
-    present_info.pSwapchains = swapchains;
-    present_info.pImageIndices = &buffer_idx;
-    present_info.pResults = nullptr;
-
-    vkQueuePresentKHR(_vk.queue, &present_info);
-}
-
-//bool Vulkan360::shouldClose()
-//{
-//    return glfwWindowShouldClose(_window);
-//}
-//
-//void Vulkan360::pollEvents()
-//{
-//    glfwPollEvents();
-//
-//    if (glfwGetKey(_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-//    {
-//        glfwSetWindowShouldClose(_window, true);
-//    }
-//}
-
 ///////////////////////////////////////////////////////////////
 //   PRIVATE METHODS                                         //
 ///////////////////////////////////////////////////////////////
-
-//void Vulkan360::readDisplayConfig(const char* config_filename)
-//{
-//    _config.load_success = true;
-//
-//    std::ifstream config_file(config_filename);
-//    if (!config_file.is_open())
-//    {
-//        fprintf(stderr, "Vulkan360> Error: config file '%s' not found'\n", config_filename);
-//        return;
-//    }
-//
-//    std::string line;
-//    int lineno = 0;
-//    while (std::getline(config_file, line))
-//    {
-//        if (lineno == 0 && line != "OmniSurface Config")
-//        {
-//            fprintf(stderr, "Vulkan360> Error: config file format not recognized - 1st line should be 'OmniSurface Config'\n");
-//            _config.load_success = false;
-//        }
-//        else if (line.length() >= 13 && line.substr(0, 12) == "Base Shape: ")
-//        {
-//            std::string shape = line.substr(12);
-//            if (shape == "plane")
-//            {
-//                _config.base_shape = DisplayBaseShape::BASE_SHAPE_PLANE;
-//            }
-//            else if (shape == "cylinder")
-//            {
-//                _config.base_shape = DisplayBaseShape::BASE_SHAPE_CYLINDER;
-//            }
-//            else
-//            {
-//                fprintf(stderr, "Vulkan360> Error: config file format not recognized - Base Shape must be 'plane' or 'cylinder'\n");
-//                _config.load_success = false;
-//            }
-//        }
-//        else if (line.length() >= 9 && line.substr(0, 8) == "Facets: ")
-//        {
-//            _config.facets = std::stoul(line.substr(8));
-//        }
-//        else if (line.length() >= 9 && line.substr(0, 8) == "Radius: ")
-//        {
-//            _config.radius = std::stod(line.substr(8));
-//        }
-//        else if (line.length() >= 9 && line.substr(0, 8) == "Height: ")
-//        {
-//            _config.height = std::stod(line.substr(8));
-//        }
-//        else if (line.length() >= 13 && line.substr(0, 12) == "Resolution: ")
-//        {
-//            std::string size = line.substr(12);
-//            size_t delim = size.find("x");
-//            if (delim == std::string::npos)
-//            {
-//                fprintf(stderr, "Vulkan360> Error: config file format not recognized - Resolution should be WIDTHxHEIGHT\n");
-//                _config.load_success = false;
-//            }
-//            else
-//            {
-//                _config.resolution_w = std::stoul(size.substr(0, delim));
-//                _config.resolution_h = std::stoul(size.substr(delim + 1));
-//            }
-//        }
-//
-//        lineno++;
-//    }
-//
-//    config_file.close();
-//}
-//
-//void Vulkan360::createFullscreenWindow(const char* title, GLFWwindow** window_ptr)
-//{
-//    if (!glfwInit())
-//    {
-//        fprintf(stderr, "Vulkan360> Error: failed to initialize GLFW\n");
-//        *window_ptr = nullptr;
-//    }
-//
-//    // Prevent GLFW from implicitly creating an OpenGL context
-//    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-//
-//    // Get primary monitor
-//    GLFWmonitor* primary_monitor = glfwGetPrimaryMonitor();
-//    if (!primary_monitor)
-//    {
-//        fprintf(stderr, "Vulkan360> Error: failed to find primary monitor\n");
-//        *window_ptr = nullptr;
-//    }
-//
-//    // Get resolution of primary monitor
-//    const GLFWvidmode* mode = glfwGetVideoMode(primary_monitor);
-//    _window_w = mode->width;
-//    _window_h = mode->height;
-//
-//    // Create fullscreen window
-//    *window_ptr = glfwCreateWindow(_window_w, _window_h, title, primary_monitor, nullptr);
-//    if (!(*window_ptr))
-//    {
-//        fprintf(stderr, "Vulkan360> Error: could not create `GLFWwindow`\n");
-//        *window_ptr = nullptr;
-//    }
-//}
-
-void Vulkan360::createVulkanInstance(const char** exts, uint32_t ext_count, VkInstance* instance_ptr)
+void vk360::Vulkan360::createVulkanInstance(VkInstance* instance_ptr)
 {
     VkApplicationInfo app_info{};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -332,17 +178,12 @@ void Vulkan360::createVulkanInstance(const char** exts, uint32_t ext_count, VkIn
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.apiVersion = VK_API_VERSION_1_3;
 
-    bool has_debug_util_ext = false;
-    bool has_physical_dev_prop2_ext = false;
-    std::vector<const char*> extensions(exts, exts + ext_count);
-    for (int i = 0; i < extensions.size(); i++)
-    {
-        if (strcmp(extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) has_debug_util_ext = true;
-        if (strcmp(extensions[i], VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) == 0) has_physical_dev_prop2_ext = true;
-    }
-    if (!has_debug_util_ext) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    if (!has_physical_dev_prop2_ext) extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-
+    std::vector<const char*> extensions = {
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+        //VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+        //VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,
+        //VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
+    };
     std::vector<const char*> validation_layers = { "VK_LAYER_KHRONOS_validation" };
 
     VkInstanceCreateInfo create_info{};
@@ -378,43 +219,7 @@ void Vulkan360::createVulkanInstance(const char** exts, uint32_t ext_count, VkIn
     }
 }
 
-void Vulkan360::createVulkanSurface(void* w_handle, void* m_handle, VkSurfaceKHR* surface_ptr)
-{
-#if defined(_WIN32)
-    HWND hwnd = (HWND)w_handle;
-    HMODULE hmod = (HMODULE)m_handle;
-
-    VkWin32SurfaceCreateInfoKHR create_surface_info{};
-    create_surface_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    create_surface_info.hwnd = hwnd;
-    create_surface_info.hinstance = hmod;
-
-    if (vkCreateWin32SurfaceKHR(_vk.instance, &create_surface_info, nullptr, surface_ptr) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: could not create `VkSurfaceKHR`\n");
-        *surface_ptr = VK_NULL_HANDLE;
-    }
-
-#elif defined(__linux__)
-    Window x11_window = (Window)w_handle;
-    Display* x11_display = (Display*)m_handle;
-
-    VkXlibSurfaceCreateInfoKHR create_surface_info{};
-    create_surface_info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
-    create_surface_info.window = x11_window;
-    create_surface_info.dpy = x11_display;
-
-    if (vkCreateXlibSurfaceKHR(instance, &create_surface_info, nullptr, surface_ptr) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: could not create `VkSurfaceKHR`\n");
-        *surface_ptr = VK_NULL_HANDLE;
-    }
-#else
-    #error "Unsupported operating system"
-#endif
-}
-
-void Vulkan360::findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr)
+void vk360::Vulkan360::findPhysicalDevice(uint8_t* device_uuid, VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr)
 {
     *physical_device_ptr = VK_NULL_HANDLE;
     *q_fam_idx_ptr = -1;
@@ -430,12 +235,16 @@ void Vulkan360::findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q
     vkEnumeratePhysicalDevices(_vk.instance, &device_count, physical_devices.data());
     for (uint32_t i = 0; i < physical_devices.size(); i++)
     {
+        VkPhysicalDeviceIDProperties device_id_props{};
+        device_id_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+
         VkPhysicalDeviceProperties2 props2{};
         props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        props2.pNext = &device_id_props;
         vkGetPhysicalDeviceProperties2(physical_devices[i], &props2);
 
         int q_fam_idx = findGraphicsComputeFamilyIndex(physical_devices[i]);
-        if (props2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && q_fam_idx >= 0)
+        if (memcmp(device_uuid, device_id_props.deviceUUID, VK_UUID_SIZE) == 0 && q_fam_idx >= 0)
         {
             *physical_device_ptr = physical_devices[i];
             *q_fam_idx_ptr = q_fam_idx;
@@ -460,7 +269,7 @@ void Vulkan360::findPhysicalDevice(VkPhysicalDevice* physical_device_ptr, int* q
     }
 }
 
-int Vulkan360::findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device)
+int vk360::Vulkan360::findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device)
 {
     int index = -1;
     uint32_t queue_family_count = 0;
@@ -469,9 +278,7 @@ int Vulkan360::findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device)
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.data());
     for (uint32_t i = 0; i < queue_family_count; i++)
     {
-        VkBool32 present_support = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, _vk.surface, &present_support);
-        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT && present_support)
+        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)
         {
             index = i;
             break;
@@ -480,19 +287,9 @@ int Vulkan360::findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device)
     return index;
 }
 
-bool Vulkan360::hasStereo3dCapability()
+void vk360::Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_ptr)
 {
-    VkSurfaceCapabilitiesKHR surface_capabilities{};
-    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(_vk.physical_device, _vk.surface, &surface_capabilities) != VK_SUCCESS)
-    {
-        return false;
-    }
-
-    if (surface_capabilities.maxImageArrayLayers < 2)
-    {
-        return false;
-    }
-
+    // Verify multiview is supported
     VkPhysicalDeviceMultiviewFeatures multiview_features{};
     multiview_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
     multiview_features.pNext = nullptr;
@@ -502,18 +299,15 @@ bool Vulkan360::hasStereo3dCapability()
     device_features2.pNext = &multiview_features;
 
     vkGetPhysicalDeviceFeatures2(_vk.physical_device, &device_features2);
-
-    printf("Physical Device: multiview=%d\n", multiview_features.multiview);
     if (multiview_features.multiview == VK_FALSE)
     {
-        return false;
+        fprintf(stderr, "Vulkan360> Error: Vulkan multiview not supported\n");
+        *device_ptr = VK_NULL_HANDLE;
+        *queue_ptr = VK_NULL_HANDLE;
+        return;
     }
 
-    return true;
-}
-
-void Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_ptr)
-{
+    // Create device and queue
     float queue_priority = 1.0f;
     VkDeviceQueueCreateInfo queue_create_info{};
     queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -521,11 +315,15 @@ void Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_
     queue_create_info.queueCount = 1;
     queue_create_info.pQueuePriorities = &queue_priority;
 
-    VkPhysicalDeviceMultiviewFeatures multiview_features{};
-    multiview_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
-    multiview_features.multiview = VK_TRUE;
-
-    const std::vector<const char*> device_extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    const std::vector<const char*> device_extensions = {
+#if defined(_WIN32)
+        VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME
+#elif defined(__linux__)
+        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME
+#endif
+    };
 
     VkDeviceCreateInfo device_create_info{};
     device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -533,122 +331,19 @@ void Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_
     device_create_info.pQueueCreateInfos = &queue_create_info;
     device_create_info.enabledExtensionCount = device_extensions.size();
     device_create_info.ppEnabledExtensionNames = device_extensions.data();
-    device_create_info.pNext = _is_stereo ? &multiview_features : nullptr;
+    device_create_info.pNext = &multiview_features;
     if (vkCreateDevice(_vk.physical_device, &device_create_info, nullptr, device_ptr) != VK_SUCCESS)
     {
         fprintf(stderr, "Vulkan360> Error: could not create `vkDevice`\n");
         *device_ptr = VK_NULL_HANDLE;
         *queue_ptr = VK_NULL_HANDLE;
+        return;
     }
 
     vkGetDeviceQueue(*device_ptr, _vk.q_family_index, 0, queue_ptr);
 }
 
-void Vulkan360::createSwapChain(VkSwapchainKHR* swapchain_ptr, std::vector<VkImage>* swapchain_images_ptr)
-{
-    VkSurfaceCapabilitiesKHR capabilities;
-    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(_vk.physical_device, _vk.surface, &capabilities) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to get physical device surface capabilities\n");
-        *swapchain_ptr = VK_NULL_HANDLE;
-    }
-
-    uint32_t format_count;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(_vk.physical_device, _vk.surface, &format_count, nullptr);
-    std::vector<VkSurfaceFormatKHR> formats(format_count);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(_vk.physical_device, _vk.surface, &format_count, formats.data());
-
-    uint32_t present_mode_count;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(_vk.physical_device, _vk.surface, &present_mode_count, nullptr);
-    std::vector<VkPresentModeKHR> present_modes(present_mode_count);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(_vk.physical_device, _vk.surface, &present_mode_count, present_modes.data());
-
-    VkSurfaceFormatKHR surface_format = chooseSwapSurfaceFormat(formats);
-    //VkExtent2D extent = chooseSwapExtent(capabilities, _window_w, _window_h);
-    VkExtent2D extent = chooseSwapExtent(capabilities, 1024, 768); // TODO: fix!
-
-    uint32_t img_count = capabilities.minImageCount + 1;
-    if (capabilities.maxImageCount > 0 && img_count > capabilities.maxImageCount)
-    {
-        img_count = capabilities.maxImageCount;
-    }
-    
-    VkSwapchainCreateInfoKHR swapchain_create_info{};
-    swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    swapchain_create_info.surface = _vk.surface;
-    swapchain_create_info.minImageCount = img_count;
-    swapchain_create_info.imageFormat = surface_format.format;
-    swapchain_create_info.imageColorSpace = surface_format.colorSpace;
-    swapchain_create_info.imageExtent = extent;
-    swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    swapchain_create_info.preTransform = capabilities.currentTransform;
-    swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swapchain_create_info.clipped = VK_TRUE;
-    swapchain_create_info.oldSwapchain = VK_NULL_HANDLE;
-    if (_is_stereo)
-    {
-        swapchain_create_info.imageArrayLayers = 2; // layer 0 = left eye, layer 1 = right eye
-        swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    }
-    else
-    {
-        swapchain_create_info.imageArrayLayers = 1;
-        VkPresentModeKHR best_mode = VK_PRESENT_MODE_FIFO_KHR;
-        for (uint32_t i = 0; i < present_modes.size(); i++)
-        {
-            if (present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
-            {
-                best_mode = present_modes[i];
-                break;
-            }
-        }
-        swapchain_create_info.presentMode = best_mode;
-    }
-
-    if (vkCreateSwapchainKHR(_vk.device, &swapchain_create_info, nullptr, swapchain_ptr) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: could not create `VkSwapchainKHR`\n");
-        *swapchain_ptr = VK_NULL_HANDLE;
-    }
-
-    uint32_t swapchain_img_count = 0;
-    vkGetSwapchainImagesKHR(_vk.device, *swapchain_ptr, &swapchain_img_count, nullptr);
-    swapchain_images_ptr->resize(swapchain_img_count);
-    if (vkGetSwapchainImagesKHR(_vk.device, _vk.swapchain, &swapchain_img_count, swapchain_images_ptr->data()) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to get swapchain images\n");
-    }
-}
-
-VkSurfaceFormatKHR Vulkan360::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& available_formats)
-{
-    for (uint32_t i = 0; i < available_formats.size(); i++)
-    {
-        if (available_formats[i].format == VK_FORMAT_B8G8R8A8_SRGB && available_formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-        {
-            return available_formats[i];
-        }
-    }
-    return available_formats[0];
-}
-
-VkExtent2D Vulkan360::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height)
-{
-    if (capabilities.currentExtent.width != (std::numeric_limits<uint32_t>::max)())
-    {
-        return capabilities.currentExtent;
-    }
-    else
-    {
-        VkExtent2D actual_extent{};
-        actual_extent.width = std::clamp(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-        actual_extent.height = std::clamp(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-        return actual_extent;
-    }
-}
-
-void Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr)
+void vk360::Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr)
 {
     VkCommandPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -660,6 +355,7 @@ void Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuf
         fprintf(stderr, "Vulkan360> Error: could not create `vkCommandPool`\n");
         *pool_ptr = VK_NULL_HANDLE;
         *cmd_ptr = VK_NULL_HANDLE;
+        return;
     }
 
     VkCommandBufferAllocateInfo cmd_alloc_info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -672,25 +368,245 @@ void Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuf
         fprintf(stderr, "Vulkan360> Error: could not allocate `vkCommandBuffer`\n");
         *pool_ptr = VK_NULL_HANDLE;
         *cmd_ptr = VK_NULL_HANDLE;
+        return;
     }
 }
 
-void Vulkan360::createSyncObjects(VkSemaphore* img_available_ptr, VkSemaphore* img_finished_ptr, VkFence* in_flight_ptr)
+void vk360::Vulkan360::createSyncObjects(VulkanInteropSemaphore* img_available_ptr, VulkanInteropSemaphore* img_finished_ptr, VkFence* in_flight_ptr)
 {
-    VkSemaphoreCreateInfo sem_create_info{};
-    sem_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    // Create external semaphores
+    createExternalSemaphore(img_available_ptr);
+    createExternalSemaphore(img_finished_ptr);
 
     VkFenceCreateInfo fence_create_info{};
     fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    if (vkCreateSemaphore(_vk.device, &sem_create_info, nullptr, img_available_ptr) != VK_SUCCESS ||
-        vkCreateSemaphore(_vk.device, &sem_create_info, nullptr, img_finished_ptr) != VK_SUCCESS ||
-        vkCreateFence(_vk.device, &fence_create_info, nullptr, in_flight_ptr) != VK_SUCCESS)
+    if (vkCreateFence(_vk.device, &fence_create_info, nullptr, in_flight_ptr) != VK_SUCCESS)
     {
-        fprintf(stderr, "Vulkan360> Error: failed to create synchronization objects\n");
-        *img_available_ptr = VK_NULL_HANDLE;
-        *img_finished_ptr = VK_NULL_HANDLE;
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkFence`\n");
         *in_flight_ptr = VK_NULL_HANDLE;
+        return;
     }
+}
+
+void vk360::Vulkan360::createExternalSemaphore(VulkanInteropSemaphore* ext_sem)
+{
+    // Specify the handle type
+    VkExportSemaphoreCreateInfo export_info{};
+    export_info.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+#if defined(_WIN32)
+    export_info.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#elif defined(__linux__)
+    export_info.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+#else
+    #error "Unsupported operating system"
+#endif
+
+    // Create Vulkan semaphores
+    VkSemaphoreCreateInfo sem_create_info{};
+    sem_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    sem_create_info.pNext = &export_info;
+    if (vkCreateSemaphore(_vk.device, &sem_create_info, nullptr, &(ext_sem->semaphore)) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkSemaphore`\n");
+        ext_sem = nullptr;
+        return;
+    }
+
+    // Extract the external handle
+#if defined(_WIN32)
+    VkSemaphoreGetWin32HandleInfoKHR get_handle_info = {};
+    get_handle_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR;
+    get_handle_info.semaphore = ext_sem->semaphore;
+    get_handle_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+    PFN_vkGetSemaphoreWin32HandleKHR vkGetSemaphoreWin32HandleKHR =
+        (PFN_vkGetSemaphoreWin32HandleKHR)vkGetDeviceProcAddr(_vk.device, "vkGetSemaphoreWin32HandleKHR");
+    vkGetSemaphoreWin32HandleKHR(_vk.device, &get_handle_info, &(ext_sem->external_handle));
+#elif defined(__linux__)
+    VkSemaphoreGetFdInfoKHR get_fd_info = {};
+    get_fd_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+    get_fd_info.semaphore = ext_sem->semaphore;
+    get_fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+    PFN_vkGetSemaphoreFdKHR vkGetSemaphoreFdKHR =
+        (PFN_vkGetSemaphoreFdKHR)vkGetDeviceProcAddr(device, "vkGetSemaphoreFdKHR");
+    vkGetSemaphoreFdKHR(device, &get_fd_info, &(ext_sem->external_handle));
+#else
+    #error "Unsupported operating system"
+#endif
+}
+
+void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint32_t layers, VkFormat format, VulkanInteropImage* ext_img)
+{
+    // Specify the handle type
+    VkExternalMemoryImageCreateInfo ext_image_info = {};
+    ext_image_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+#if defined (_WIN32)
+    ext_image_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#elif defined (__linux__)
+    ext_image_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#else
+    #error "Unsupported operating system"
+#endif
+
+    // Setup the Image
+    VkImageCreateInfo image_info = {};
+    VkImageUsageFlags usage_flags = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (format == VK_FORMAT_R8G8B8A8_UNORM)
+    {
+        usage_flags |= VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    }
+    else if (format == VK_FORMAT_D32_SFLOAT)
+    {
+        usage_flags |= VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    }
+    else if (format == VK_FORMAT_D24_UNORM_S8_UINT)
+    {
+        usage_flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    }
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.pNext = &ext_image_info;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = format;
+    image_info.extent = { width, height, 1 };
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = layers;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.usage = usage_flags;
+
+    vkCreateImage(_vk.device, &image_info, nullptr, &(ext_img->vk_img_data.image));
+
+    VkMemoryRequirements mem_reqs;
+    vkGetImageMemoryRequirements(_vk.device, ext_img->vk_img_data.image, &mem_reqs);
+
+    // Define the Export info
+    VkExportMemoryAllocateInfo export_info = {};
+    export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+#if defined(_WIN32)
+    export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#elif defined(__linux__)
+    export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#else
+    #error "Unsupported operating system"
+#endif
+    export_info.pNext = nullptr;
+
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = findMemoryType(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    alloc_info.pNext = &export_info;
+
+    vkAllocateMemory(_vk.device, &alloc_info, nullptr, &(ext_img->vk_img_data.memory));
+    vkBindImageMemory(_vk.device, ext_img->vk_img_data.image, ext_img->vk_img_data.memory, 0);
+
+    // Extract the external handle
+#if defined (_WIN32)
+    ext_img->external_handle = nullptr;
+    VkMemoryGetWin32HandleInfoKHR get_handle_info = {};
+    get_handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+    get_handle_info.memory = ext_img->vk_img_data.memory;
+    get_handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+    PFN_vkGetMemoryWin32HandleKHR vkGetMemoryWin32HandleKHR =
+        (PFN_vkGetMemoryWin32HandleKHR)vkGetDeviceProcAddr(_vk.device, "vkGetMemoryWin32HandleKHR");
+    vkGetMemoryWin32HandleKHR(_vk.device, &get_handle_info, &(ext_img->external_handle));
+#elif defined(__linux__)
+    image->external_handle = -1;
+    VkMemoryGetFdInfoKHR get_fd_info = {};
+    get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+    get_fd_info.memory = image->vk_img_data.memory;
+    get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+    PFN_vkGetMemoryFdKHR vkGetMemoryFdKHR =
+        (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(device, "vkGetMemoryFdKHR");
+    vkGetMemoryFdKHR(device, &get_fd_info, &(image->external_handle));
+#else
+    #error "Unsupported operating system"
+#endif
+
+    ext_img->vk_img_data.mem_size = mem_reqs.size;
+    ext_img->vk_img_data.format = format;
+
+    transitionImageLayoutToGeneral(ext_img->vk_img_data.image, ext_img->vk_img_data.format);
+}
+
+int vk360::Vulkan360::findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties)
+{
+    int index = -1;
+    VkPhysicalDeviceMemoryProperties mem_properties;
+    vkGetPhysicalDeviceMemoryProperties(_vk.physical_device, &mem_properties);
+    for (int i = 0; i < mem_properties.memoryTypeCount; i++)
+    {
+        if ((type_filter & (1u << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties)
+        {
+            index = i;
+            break;
+        }
+    }
+    return index;
+}
+
+void vk360::Vulkan360::transitionImageLayoutToGeneral(VkImage image, VkFormat format)
+{
+    // Allocate a temporary command buffer
+    VkCommandBufferAllocateInfo alloc_info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandPool = _vk.pool;
+    alloc_info.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(_vk.device, &alloc_info, &cmd);
+
+    // Start recording
+    VkCommandBufferBeginInfo begin_info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin_info);
+
+    VkImageAspectFlags aspect_flags = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (format == VK_FORMAT_D32_SFLOAT)
+    {
+        aspect_flags = VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+    else if (format == VK_FORMAT_D24_UNORM_S8_UINT)
+    {
+        aspect_flags = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+
+    recordImageBarrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, 0,
+        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+        aspect_flags, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit and wait (blocking call for setup only)
+    VkSubmitInfo submit_info = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(_vk.queue, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(_vk.queue);
+
+    vkFreeCommandBuffers(_vk.device, _vk.pool, 1, &cmd);
+}
+
+void vk360::Vulkan360::recordImageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+    uint32_t src_queue_family, uint32_t dest_queue_family, VkAccessFlags src_access, VkAccessFlags dst_access,
+    VkImageAspectFlags aspect_flags, VkPipelineStageFlags src_stage, VkPipelineStageFlags dest_stage)
+{
+    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = src_queue_family;
+    barrier.dstQueueFamilyIndex = dest_queue_family;
+    barrier.image = image;
+    barrier.subresourceRange = { aspect_flags, 0, 1, 0, 1 };
+    barrier.srcAccessMask = src_access;
+    barrier.dstAccessMask = dst_access;
+
+    vkCmdPipelineBarrier(cmd, src_stage, dest_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
