@@ -31,10 +31,27 @@ vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t heigh
     createVulkanInstance(&_vk.instance);
     findPhysicalDevice(device_uuid, &_vk.physical_device, &_vk.q_family_index);
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
-    createCommandPoolAndBuffer(&_vk.pool, &_vk.cmd);
-    createSyncObjects(&_vk.img_available, &_vk.img_finished, &_vk.in_flight);
-    createExternalImage(_width, _height, _is_stereo ? 2 : 1, VK_FORMAT_R8G8B8A8_UNORM, &(_vk.render_buffer[0]));
-    createExternalImage(_width, _height, _is_stereo ? 2 : 1, VK_FORMAT_R8G8B8A8_UNORM, &(_vk.render_buffer[1]));
+    createCommandPool(&_vk.pool);
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        VulkanRenderBuffer& buf = _vk.render_buffer[i];
+        createCommandBuffer(&buf.cmd);
+        createSyncObjects(&buf.sem_vk_available, &buf.sem_vk_finished, &buf.in_flight_fence);
+        createExternalImage(_width, _height, _is_stereo ? 2 : 1, VK_FORMAT_R8G8B8A8_UNORM, &buf.image);
+
+        VkSubmitInfo prime_submit{};
+        prime_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        prime_submit.signalSemaphoreCount = 1;
+        prime_submit.pSignalSemaphores = &_vk.render_buffer[i].sem_vk_available.semaphore;
+        VkResult r = vkQueueSubmit(_vk.queue, 1, &prime_submit, VK_NULL_HANDLE);
+        if (r != VK_SUCCESS)
+        {
+            fprintf(stderr, "ERROR: %d\n", r);
+        }
+    }
+    vkQueueWaitIdle(_vk.queue);
+
+    _vk.render_buffer_index = 0;
 }
 
 vk360::Vulkan360::~Vulkan360()
@@ -44,105 +61,119 @@ vk360::Vulkan360::~Vulkan360()
 
 void vk360::Vulkan360::getExternalRenderBufferInfo(uint32_t index, ExternalImageInfo* ext_img)
 {
-    ext_img->external_handle = _vk.render_buffer[index].external_handle;
-    ext_img->memory_size = _vk.render_buffer[index].vk_img_data.mem_size;
-    ext_img->width = _vk.render_buffer[index].vk_img_data.width;
-    ext_img->height = _vk.render_buffer[index].vk_img_data.height;
-    ext_img->layers = _vk.render_buffer[index].vk_img_data.layers;
+    ext_img->external_handle = _vk.render_buffer[index].image.external_handle;
+    ext_img->memory_size = _vk.render_buffer[index].image.vk_img_data.mem_size;
+    ext_img->width = _vk.render_buffer[index].image.vk_img_data.width;
+    ext_img->height = _vk.render_buffer[index].image.vk_img_data.height;
+    ext_img->layers = _vk.render_buffer[index].image.vk_img_data.layers;
 }
 
 #if defined(_WIN32)
-void vk360::Vulkan360::getExternalImageAvailableSemaphoreInfo(HANDLE* ext_handle)
+void vk360::Vulkan360::getExternalSignalAvailableSemaphoreHandle(uint32_t index, HANDLE* ext_handle)
 #elif defined(__linux__)
-void vk360::Vulkan360::getExternalImageAvailableSemaphoreInfo(int* ext_handle)
+void vk360::Vulkan360::getExternalSignalAvailableSemaphoreHandle(uint32_t index, int* ext_handle)
 #endif
 {
-    *ext_handle = _vk.img_available.external_handle;
+    *ext_handle = _vk.render_buffer[index].sem_vk_available.external_handle;
 }
 
 #if defined(_WIN32)
-void vk360::Vulkan360::getExternalImageFinishedSemaphoreInfo(HANDLE* ext_handle)
+void vk360::Vulkan360::getExternalWaitFinishedSemaphoreHandle(uint32_t index, HANDLE* ext_handle)
 #elif defined(__linux__)
-void vk360::Vulkan360::getExternalImageFinishedSemaphoreInfo(int* ext_handle)
+void vk360::Vulkan360::getExternalWaitFinishedSemaphoreHandle(uint32_t index, int* ext_handle)
 #endif
 {
-    *ext_handle = _vk.img_finished.external_handle;
+    *ext_handle = _vk.render_buffer[index].sem_vk_finished.external_handle;
 }
 
-void vk360::Vulkan360::drawFrame(uint32_t buffer_idx)
+int vk360::Vulkan360::drawFrame()
 {
+    // Get back buffer - resources to render image into
+    VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
+
+    // Wait for prior frame resources to be available to overwrite
+    vkWaitForFences(_vk.device, 1, &buf.in_flight_fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(_vk.device, 1, &buf.in_flight_fence);
+
+    // Reset command buffer
+    vkResetCommandBuffer(buf.cmd, 0);
+
     // Record draw commands
-    //VkImage current_image = _vk.swapchain_images[buffer_idx];
-
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    if (vkBeginCommandBuffer(_vk.cmd, &begin_info) != VK_SUCCESS)
+    if (vkBeginCommandBuffer(buf.cmd, &begin_info) != VK_SUCCESS)
     {
         fprintf(stderr, "Vulkan360> Error: failed to begin recording command buffer\n");
     }
 
-    /////
-    /////
+    //
+    // TEST - clear each eye a different color
+    //
+    VkImageMemoryBarrier barrier_to_clear{};
+    barrier_to_clear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier_to_clear.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier_to_clear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier_to_clear.srcAccessMask = 0;
+    barrier_to_clear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier_to_clear.image = buf.image.vk_img_data.image;
+    barrier_to_clear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier_to_clear.subresourceRange.baseMipLevel = 0;
+    barrier_to_clear.subresourceRange.levelCount = 1;
+    barrier_to_clear.subresourceRange.baseArrayLayer = 0;
+    barrier_to_clear.subresourceRange.layerCount = buf.image.vk_img_data.layers;
 
-    VkImageMemoryBarrier barrierToClear{};
-    barrierToClear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrierToClear.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // likely ok, but could do transition to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR at creation time, then set to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR here
-    barrierToClear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrierToClear.srcAccessMask = 0;
-    barrierToClear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    //barrierToClear.image = current_image;
-    barrierToClear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrierToClear.subresourceRange.baseMipLevel = 0;
-    barrierToClear.subresourceRange.levelCount = 1;
-    barrierToClear.subresourceRange.baseArrayLayer = 0;
-    barrierToClear.subresourceRange.layerCount = _is_stereo ? 2 : 1; // Clear both stereo layers if true
+    vkCmdPipelineBarrier(buf.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier_to_clear);
 
-    vkCmdPipelineBarrier(_vk.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrierToClear);
+    VkClearColorValue clear_color_left = { {0.2f, 0.3f, 0.5f, 1.0f} };
+    VkClearColorValue clear_color_right = { {0.6f, 0.2f, 0.2f, 1.0f} };
 
-    // =================================================================
-    // THE CLEAR COMMAND (Choose your background color here!)
-    // =================================================================
-    // Float values represent Normalized Red, Green, Blue, Alpha (0.0 to 1.0)
-    VkClearColorValue clearColor = { {0.2f, 0.3f, 0.4f, 1.0f} }; // A nice slate steel blue
+    VkImageSubresourceRange range_left{};
+    range_left.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range_left.baseMipLevel = 0;
+    range_left.levelCount = 1;
+    range_left.baseArrayLayer = 0;
+    range_left.layerCount = 1;
 
-    VkImageSubresourceRange range{};
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = _is_stereo ? 2 : 1; // Erase both stereo layers in tandem!
+    vkCmdClearColorImage(buf.cmd, buf.image.vk_img_data.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color_left, 1, &range_left);
 
-    //vkCmdClearColorImage(_vk.cmd, current_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
+    if (buf.image.vk_img_data.layers > 1)
+    {
+        VkImageSubresourceRange range_right{};
+        range_right.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        range_right.baseMipLevel = 0;
+        range_right.levelCount = 1;
+        range_right.baseArrayLayer = 1;
+        range_right.layerCount = 1;
 
-    // --- BARRIER 2: Transition Image Layout back to Present Source ---
-    VkImageMemoryBarrier barrierToPresent = barrierToClear;
-    barrierToPresent.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrierToPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barrierToPresent.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrierToPresent.dstAccessMask = 0;
+        vkCmdClearColorImage(buf.cmd, buf.image.vk_img_data.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color_right, 1, &range_right);
+    }
 
-    vkCmdPipelineBarrier(_vk.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrierToPresent);
+    VkImageMemoryBarrier barrier_to_present = barrier_to_clear;
+    barrier_to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier_to_present.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier_to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier_to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 
-    // =================================================================
-    // CLOSE THE COMMAND BUFFER
-    // =================================================================
-    if (vkEndCommandBuffer(_vk.cmd) != VK_SUCCESS)
+    vkCmdPipelineBarrier(buf.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier_to_present);
+
+    if (vkEndCommandBuffer(buf.cmd) != VK_SUCCESS)
     {
         throw std::runtime_error("Failed to record command buffer!");
     }
 
-    /////
-    /////
+    //
+    // End: TEST
+    //
 
 
     // Submit your recorded drawing commands
-    VkSemaphore wait_semaphores[] = { _vk.img_available.semaphore };
-    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSemaphore signal_semaphores[] = { _vk.img_finished.semaphore };
+    VkSemaphore wait_semaphores[] = { buf.sem_vk_available.semaphore };
+    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
+    VkSemaphore signal_semaphores[] = { buf.sem_vk_finished.semaphore };
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -150,14 +181,19 @@ void vk360::Vulkan360::drawFrame(uint32_t buffer_idx)
     submit_info.pWaitSemaphores = wait_semaphores;
     submit_info.pWaitDstStageMask = wait_stages;
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &_vk.cmd;
+    submit_info.pCommandBuffers = &buf.cmd;
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = signal_semaphores;
 
-    if (vkQueueSubmit(_vk.queue, 1, &submit_info, _vk.in_flight) != VK_SUCCESS)
+    if (vkQueueSubmit(_vk.queue, 1, &submit_info, buf.in_flight_fence)  != VK_SUCCESS)
     {
         fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
     }
+
+    int render_buf_idx = _vk.render_buffer_index;
+    _vk.render_buffer_index = 1 - _vk.render_buffer_index; // toggle between 0 and 1
+
+    return render_buf_idx;
 }
 
 ///////////////////////////////////////////////////////////////
@@ -175,9 +211,6 @@ void vk360::Vulkan360::createVulkanInstance(VkInstance* instance_ptr)
 
     std::vector<const char*> extensions = {
         VK_EXT_DEBUG_UTILS_EXTENSION_NAME
-        //VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-        //VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,
-        //VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
     };
     std::vector<const char*> validation_layers = { "VK_LAYER_KHRONOS_validation" };
 
@@ -331,7 +364,7 @@ void vk360::Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue*
     vkGetDeviceQueue(*device_ptr, _vk.q_family_index, 0, queue_ptr);
 }
 
-void vk360::Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr)
+void vk360::Vulkan360::createCommandPool(VkCommandPool* pool_ptr)
 {
     VkCommandPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -342,19 +375,20 @@ void vk360::Vulkan360::createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCom
     {
         fprintf(stderr, "Vulkan360> Error: could not create `vkCommandPool`\n");
         *pool_ptr = VK_NULL_HANDLE;
-        *cmd_ptr = VK_NULL_HANDLE;
         return;
     }
+}
 
+void vk360::Vulkan360::createCommandBuffer(VkCommandBuffer* cmd_ptr)
+{
     VkCommandBufferAllocateInfo cmd_alloc_info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-    cmd_alloc_info.commandPool = *pool_ptr;
+    cmd_alloc_info.commandPool = _vk.pool;
     cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cmd_alloc_info.commandBufferCount = 1;
 
     if (vkAllocateCommandBuffers(_vk.device, &cmd_alloc_info, cmd_ptr) != VK_SUCCESS)
     {
         fprintf(stderr, "Vulkan360> Error: could not allocate `vkCommandBuffer`\n");
-        *pool_ptr = VK_NULL_HANDLE;
         *cmd_ptr = VK_NULL_HANDLE;
         return;
     }
@@ -522,7 +556,7 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     ext_img->vk_img_data.height = height;
     ext_img->vk_img_data.layers = layers;
 
-    transitionImageLayoutToGeneral(ext_img->vk_img_data.image, ext_img->vk_img_data.format);
+    transitionImageLayoutToGeneral(ext_img->vk_img_data.image, ext_img->vk_img_data.format, ext_img->vk_img_data.layers);
 }
 
 int vk360::Vulkan360::findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties)
@@ -541,7 +575,7 @@ int vk360::Vulkan360::findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags
     return index;
 }
 
-void vk360::Vulkan360::transitionImageLayoutToGeneral(VkImage image, VkFormat format)
+void vk360::Vulkan360::transitionImageLayoutToGeneral(VkImage image, VkFormat format, uint32_t layers)
 {
     // Allocate a temporary command buffer
     VkCommandBufferAllocateInfo alloc_info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -567,10 +601,22 @@ void vk360::Vulkan360::transitionImageLayoutToGeneral(VkImage image, VkFormat fo
         aspect_flags = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
     }
 
-    recordImageBarrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-        VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, 0,
-        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-        aspect_flags, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = aspect_flags;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = layers;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     vkEndCommandBuffer(cmd);
 
@@ -583,21 +629,4 @@ void vk360::Vulkan360::transitionImageLayoutToGeneral(VkImage image, VkFormat fo
     vkQueueWaitIdle(_vk.queue);
 
     vkFreeCommandBuffers(_vk.device, _vk.pool, 1, &cmd);
-}
-
-void vk360::Vulkan360::recordImageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
-    uint32_t src_queue_family, uint32_t dest_queue_family, VkAccessFlags src_access, VkAccessFlags dst_access,
-    VkImageAspectFlags aspect_flags, VkPipelineStageFlags src_stage, VkPipelineStageFlags dest_stage)
-{
-    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-    barrier.oldLayout = old_layout;
-    barrier.newLayout = new_layout;
-    barrier.srcQueueFamilyIndex = src_queue_family;
-    barrier.dstQueueFamilyIndex = dest_queue_family;
-    barrier.image = image;
-    barrier.subresourceRange = { aspect_flags, 0, 1, 0, 1 };
-    barrier.srcAccessMask = src_access;
-    barrier.dstAccessMask = dst_access;
-
-    vkCmdPipelineBarrier(cmd, src_stage, dest_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }

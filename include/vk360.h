@@ -54,6 +54,13 @@ namespace vk360 {
 
     class Vulkan360 {
     private:
+        struct VulkanRenderBuffer {
+            VkCommandBuffer cmd;
+            VulkanInteropSemaphore sem_vk_available;
+            VulkanInteropSemaphore sem_vk_finished;
+            VkFence in_flight_fence;
+            VulkanInteropImage image;
+        };
         struct VulkanData {
             VkInstance instance;
             VkPhysicalDevice physical_device;
@@ -61,11 +68,8 @@ namespace vk360 {
             VkDevice device;
             VkQueue queue;
             VkCommandPool pool;
-            VkCommandBuffer cmd;
-            VulkanInteropSemaphore img_available;
-            VulkanInteropSemaphore img_finished;
-            VkFence in_flight;
-            VulkanInteropImage render_buffer[2];
+            VulkanRenderBuffer render_buffer[2];
+            int render_buffer_index;
         };
 
         VulkanData _vk;
@@ -77,15 +81,13 @@ namespace vk360 {
         void findPhysicalDevice(uint8_t* device_uuid, VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr);
         int findGraphicsComputeFamilyIndex(VkPhysicalDevice physical_device);
         void createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue* queue_ptr);
-        void createCommandPoolAndBuffer(VkCommandPool* pool_ptr, VkCommandBuffer* cmd_ptr);
+        void createCommandPool(VkCommandPool* pool_ptr);
+        void createCommandBuffer(VkCommandBuffer* cmd_ptr);
         void createSyncObjects(VulkanInteropSemaphore* img_available_ptr, VulkanInteropSemaphore* img_finished_ptr, VkFence* in_flight_ptr);
         void createExternalSemaphore(VulkanInteropSemaphore* ext_sem);
         void createExternalImage(uint32_t width, uint32_t height, uint32_t layers, VkFormat format, VulkanInteropImage* ext_img);
         int findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
-        void transitionImageLayoutToGeneral(VkImage image, VkFormat format);
-        void recordImageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
-            uint32_t src_queue_family, uint32_t dest_queue_family, VkAccessFlags src_access, VkAccessFlags dst_access,
-            VkImageAspectFlags aspect_flags, VkPipelineStageFlags src_stage, VkPipelineStageFlags dest_stage);
+        void transitionImageLayoutToGeneral(VkImage image, VkFormat format, uint32_t layers);
 
     public:
         Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo);
@@ -93,12 +95,12 @@ namespace vk360 {
 
         void getExternalRenderBufferInfo(uint32_t index, ExternalImageInfo* ext_img);
 #if defined(_WIN32)
-        void getExternalImageAvailableSemaphoreInfo(HANDLE* ext_handle);
-        void getExternalImageFinishedSemaphoreInfo(HANDLE* ext_handle);
+        void getExternalSignalAvailableSemaphoreHandle(uint32_t index, HANDLE* ext_handle);
+        void getExternalWaitFinishedSemaphoreHandle(uint32_t index, HANDLE* ext_handle);
 #elif defined(__linux__)
-        void getExternalImageAvailableSemaphoreInfo(int* ext_handle);
-        void getExternalImageFinishedSemaphoreInfo(int* ext_handle);
+        void getExternalSignalAvailableSemaphoreHandle(uint32_t index, int* ext_handle);
+        void getExternalWaitFinishedSemaphoreHandle(uint32_t index, int* ext_handle);
 #endif
-        void drawFrame(uint32_t buffer_idx);
+        int drawFrame();
     };
 }

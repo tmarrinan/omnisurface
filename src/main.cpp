@@ -34,9 +34,10 @@ struct DisplayConfig {
 };
 
 struct PresentData {
-    GLuint render_buffers[2];
-    GLuint img_available_sem;
-    GLuint img_finished_sem;
+    GLuint render_image;
+    GLuint sem_signal_available;
+    GLuint sem_wait_finished;
+    GLuint fbo[2];
 };
 
 // Function definitions
@@ -83,22 +84,45 @@ int main()
     vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, is_stereo);
 
     // Import external data to OpenGL for framebuffer presentation
-    vk360::ExternalImageInfo render_buffer_info[2];
-    app->getExternalRenderBufferInfo(0, &(render_buffer_info[0]));
-    app->getExternalRenderBufferInfo(1, &(render_buffer_info[1]));
-    ExternalHandle img_available_handle, img_finished_handle;
-    app->getExternalImageAvailableSemaphoreInfo(&img_available_handle);
-    app->getExternalImageFinishedSemaphoreInfo(&img_finished_handle);
+    PresentData present[2];
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        vk360::ExternalImageInfo render_buffer_info;
+        app->getExternalRenderBufferInfo(i, &render_buffer_info);
 
-    PresentData present;
-    importExternalTextureArray(render_buffer_info[0], &(present.render_buffers[0]));
-    importExternalTextureArray(render_buffer_info[1], &(present.render_buffers[1]));
-    importExternalSemaphore(img_available_handle, &(present.img_available_sem));
-    importExternalSemaphore(img_finished_handle, &(present.img_finished_sem));
+        ExternalHandle sem_available_handle, sem_finished_handle;
+        app->getExternalSignalAvailableSemaphoreHandle(i, &sem_available_handle);
+        app->getExternalWaitFinishedSemaphoreHandle(i, &sem_finished_handle);
 
-    printf("gl errors: %d\n", glGetError());
+        importExternalTextureArray(render_buffer_info, &(present[i].render_image));
+        importExternalSemaphore(sem_available_handle, &(present[i].sem_signal_available));
+        importExternalSemaphore(sem_finished_handle, &(present[i].sem_wait_finished));
+
+        for (uint32_t j = 0; j < (is_stereo ? 2 : 1); j++)
+        {
+            glGenFramebuffers(1, &(present[i].fbo[j]));
+            glBindFramebuffer(GL_FRAMEBUFFER, present[i].fbo[j]);
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, present[i].render_image, 0, j);
+
+            GLenum draw_buffers[1] = { GL_COLOR_ATTACHMENT0 };
+            glDrawBuffers(1, draw_buffers);
+
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            {
+                fprintf(stderr, "OmniSurface> Error: failed to create framebuffer object\n");
+            }
+        }
+    }
+
+    // Initialize OpenGL settings
+    glDisable(GL_DEPTH_TEST);
+    uint32_t num_views = is_stereo ? 2 : 1;
+    GLenum draw_buffer_index[2] = { GL_BACK_LEFT, GL_BACK_RIGHT };
+    if (!is_stereo) draw_buffer_index[0] = GL_BACK;
 
     // Main render loop
+    GLuint buffers[1];
+    GLenum layouts[1] = { GL_LAYOUT_GENERAL_EXT };
     while (!glfwWindowShouldClose(window))
     {
         // Poll for user events
@@ -109,6 +133,30 @@ int main()
         {
             glfwSetWindowShouldClose(window, true);
         }
+
+        // Trigger render (Vulkan)
+        uint32_t buffer_idx = app->drawFrame();
+
+        // Wait for Vulkan to signal render is complete
+        buffers[0] = present[buffer_idx].render_image;
+        glWaitSemaphoreEXT(present[buffer_idx].sem_wait_finished, 0, nullptr, 1, buffers, layouts);
+        
+        // Blit rendered image to screen
+        for (uint32_t i = 0; i < num_views; i++)
+        {
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, present[buffer_idx].fbo[i]);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glDrawBuffer(draw_buffer_index[i]);
+
+            glBlitFramebuffer(0, 0, window_w, window_h, 0, 0, window_w, window_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
+        glfwSwapBuffers(window);
+
+        // Signal that OpenGL is finished with rendered image (now available for Vulkan to reuse)
+        glSignalSemaphoreEXT(present[buffer_idx].sem_signal_available, 0, nullptr, 1, buffers, layouts);
+        glFlush();
     }
 
     return EXIT_SUCCESS;
@@ -256,7 +304,7 @@ void importExternalTextureArray(vk360::ExternalImageInfo& ext_img_info, GLuint* 
 
 void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore)
 {
-    // Import the FD for OpenGL version of the shared semaphore
+    // Create shared semaphore from provided handle
     glGenSemaphoresEXT(1, semaphore);
 #if defined(_WIN32)
     glImportSemaphoreWin32HandleEXT(*semaphore, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, sem_handle);
