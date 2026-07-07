@@ -14,6 +14,42 @@
 
 
 namespace vk360 {
+    enum DisplayBaseShape : uint8_t { BASE_SHAPE_UNKNOWN, BASE_SHAPE_PLANE, BASE_SHAPE_CYLINDER };
+
+    struct DisplaySurface {
+        DisplayBaseShape base_shape;
+    };
+
+    struct DisplayPlaneSurface : DisplaySurface {
+        double size[2];
+        double center[3];
+        double normal[3];
+    };
+
+    struct DisplayCylinderSurface : DisplaySurface {
+        double radius;
+        double altitude[2];
+        double sector[2];
+    };
+
+    class DisplayConfig {
+    private:
+        int _monitor_index;
+        std::vector<DisplaySurface*> _surfaces;
+        double _origin[3];
+    public:
+        DisplayConfig();
+        ~DisplayConfig();
+
+        bool loadFromFile(const char* config_filename);
+        int getMonitor();
+        uint32_t getSurfaceCount();
+        void getSurface(uint32_t index, DisplaySurface** surf_ptr);
+        void getOrigin(double* origin);
+        void printConfig();
+    };
+
+
     struct ExternalImageInfo {
 #if defined(_WIN32)
         HANDLE external_handle = nullptr;
