@@ -269,6 +269,9 @@ vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t heigh
         }
     }
     vkQueueWaitIdle(_vk.queue);
+    createRenderPass(&_vk.render_pass);
+    createDescriptorSetLayout(&_vk.desc_layout);
+    createGraphicsPipeline(&_vk.pipeline, &_vk.pipeline_layout);
 
     _vk.render_buffer_index = 0;
 }
@@ -1056,6 +1059,87 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     transitionImageLayoutToGeneral(ext_img->vk_img_data.image, ext_img->vk_img_data.format, ext_img->vk_img_data.layers);
 }
 
+void vk360::Vulkan360::createRenderPass(VkRenderPass* render_pass_ptr)
+{
+    VkAttachmentDescription color_attachment{};
+    color_attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+    color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    color_attachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkAttachmentReference color_attachment_ref{};
+    color_attachment_ref.attachment = 0;
+    color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &color_attachment_ref;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo render_pass_info{};
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    render_pass_info.attachmentCount = 1;
+    render_pass_info.pAttachments = &color_attachment;
+    render_pass_info.subpassCount = 1;
+    render_pass_info.pSubpasses = &subpass;
+    render_pass_info.dependencyCount = 1;
+    render_pass_info.pDependencies = &dependency;
+
+    if (vkCreateRenderPass(_vk.device, &render_pass_info, nullptr, render_pass_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkRenderPass`\n");
+        render_pass_ptr = nullptr;
+    }
+}
+
+void vk360::Vulkan360::createDescriptorSetLayout(VkDescriptorSetLayout* desc_layout_ptr)
+{
+    VkDescriptorSetLayoutBinding sampler_layout_binding{};
+    sampler_layout_binding.binding = 0;
+    sampler_layout_binding.descriptorCount = 1;
+    sampler_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sampler_layout_binding.pImmutableSamplers = nullptr;
+    sampler_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layout_info{};
+    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.bindingCount = 1;
+    layout_info.pBindings = &sampler_layout_binding;
+
+    if (vkCreateDescriptorSetLayout(_vk.device, &layout_info, nullptr, desc_layout_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkDescriptorSetLayout`\n");
+        desc_layout_ptr = nullptr;
+    }
+}
+
+void vk360::Vulkan360::createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr)
+{
+    // Create Pipeline Layout
+    //  - push constants? uniforms?
+    // TODO
+
+    // Load vertex and fragment shaders
+    VkShaderModule vertex_shader, fragment_shader;
+    loadShaderModule("resrc/shaders/equirect_nonplanar_vert.glsl.spv", &vertex_shader);
+    loadShaderModule("resrc/shaders/equirect_nonplanar_frag.glsl.spv", &fragment_shader);
+
+    // Create Pipeline
+    // TODO
+}
+
 int vk360::Vulkan360::findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties)
 {
     int index = -1;
@@ -1126,4 +1210,33 @@ void vk360::Vulkan360::transitionImageLayoutToGeneral(VkImage image, VkFormat fo
     vkQueueWaitIdle(_vk.queue);
 
     vkFreeCommandBuffers(_vk.device, _vk.pool, 1, &cmd);
+}
+
+void vk360::Vulkan360::loadShaderModule(const char* path, VkShaderModule* shader_ptr)
+{
+    std::ifstream file(path, std::ios::ate | std::ios::binary);
+    if (!file.is_open())
+    {
+        fprintf(stderr, "Vulkan360> Error: Failed to open shader file '%s'\n", path);
+        *shader_ptr = VK_NULL_HANDLE;
+        return;
+    }
+
+    size_t file_size = (size_t)file.tellg();
+    std::vector<char> buffer(file_size);
+    file.seekg(0);
+    file.read(buffer.data(), file_size);
+    file.close();
+
+    VkShaderModuleCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    create_info.codeSize = buffer.size();
+    create_info.pCode = reinterpret_cast<const uint32_t*>(buffer.data());
+
+    if (vkCreateShaderModule(_vk.device, &create_info, nullptr, shader_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: Failed to create `VkShaderModule`\n");
+        *shader_ptr = VK_NULL_HANDLE;
+        return;
+    }
 }

@@ -113,6 +113,10 @@ namespace vk360 {
             VkCommandPool pool;
             VulkanRenderBuffer render_buffer[2];
             int render_buffer_index;
+            VkRenderPass render_pass;
+            VkDescriptorSetLayout desc_layout;
+            VkPipeline pipeline;
+            VkPipelineLayout pipeline_layout;
             VulkanTexture media360;
         };
 
@@ -130,8 +134,12 @@ namespace vk360 {
         void createSyncObjects(VulkanInteropSemaphore* img_available_ptr, VulkanInteropSemaphore* img_finished_ptr, VkFence* in_flight_ptr);
         void createExternalSemaphore(VulkanInteropSemaphore* ext_sem);
         void createExternalImage(uint32_t width, uint32_t height, uint32_t layers, VkFormat format, VulkanInteropImage* ext_img);
+        void createRenderPass(VkRenderPass* render_pass_ptr);
+        void createDescriptorSetLayout(VkDescriptorSetLayout* desc_layout_ptr);
+        void createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr);
         int findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
         void transitionImageLayoutToGeneral(VkImage image, VkFormat format, uint32_t layers);
+        void loadShaderModule(const char* path, VkShaderModule* shader_ptr);
 
     public:
         Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo);

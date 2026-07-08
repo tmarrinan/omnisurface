@@ -192,7 +192,10 @@ GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* widt
     if (!window)
     {
         glfwWindowHint(GLFW_STEREO, GLFW_FALSE);
-        window = glfwCreateWindow(mode->width, mode->height, title, monitors[monitor_idx], nullptr);
+        int win_w = 0.9 * static_cast<double>(mode->width);
+        int win_h = 0.9 * static_cast<double>(mode->height);
+        window = glfwCreateWindow(win_w, win_h, title, nullptr, nullptr);
+        //window = glfwCreateWindow(mode->width, mode->height, title, monitors[monitor_idx], nullptr);
         if (!window)
         {
             fprintf(stderr, "OmniSurface> Error: could not create `GLFWwindow`\n");
