@@ -305,7 +305,228 @@ void vk360::Vulkan360::getExternalWaitFinishedSemaphoreHandle(uint32_t index, in
     *ext_handle = _vk.render_buffer[index].sem_vk_finished.external_handle;
 }
 
-int vk360::Vulkan360::drawFrame()
+void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
+{
+    // Free old texture (if exists)
+    if (_vk.media360.image != VK_NULL_HANDLE)
+    {
+        vkDeviceWaitIdle(_vk.device);
+
+        vkDestroySampler(_vk.device, _vk.media360.sampler, nullptr);
+        vkDestroyImageView(_vk.device, _vk.media360.view, nullptr);
+        vkDestroyImage(_vk.device, _vk.media360.image, nullptr);
+        vkFreeMemory(_vk.device, _vk.media360.memory, nullptr);
+    }
+
+    // Read image
+    int w, h, ch;
+    uint8_t* pixels = stbi_load(path, &w, &h, &ch, 4);
+
+    // Create CPU buffer to store image pixels
+    size_t image_size = w * h * 4;
+
+    VkBufferCreateInfo buffer_create_info{};
+    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_create_info.size = image_size;
+    buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer buffer;
+    if (vkCreateBuffer(_vk.device, &buffer_create_info, nullptr, &buffer) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create pixel buffer\n");
+        return;
+    }
+
+    VkMemoryRequirements buffer_mem_reqs;
+    vkGetBufferMemoryRequirements(_vk.device, buffer, &buffer_mem_reqs);
+
+    VkMemoryAllocateInfo buffer_alloc_info{};
+    buffer_alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    buffer_alloc_info.allocationSize = buffer_mem_reqs.size;
+    buffer_alloc_info.memoryTypeIndex = findMemoryType(buffer_mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    VkDeviceMemory buffer_mem;
+    vkAllocateMemory(_vk.device, &buffer_alloc_info, nullptr, &buffer_mem);
+    vkBindBufferMemory(_vk.device, buffer, buffer_mem, 0);
+
+    // Copy pixel data to CPU buffer
+    void* data;
+    vkMapMemory(_vk.device, buffer_mem, 0, image_size, 0, &data);
+    std::memcpy(data, pixels, image_size);
+    vkUnmapMemory(_vk.device, buffer_mem);
+
+    // Free pixels from CPU memory
+    stbi_image_free(pixels);
+
+    // Create image
+    VkImageCreateInfo image_create_info{};
+    image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_create_info.imageType = VK_IMAGE_TYPE_2D;
+    image_create_info.extent.width = w;
+    image_create_info.extent.height = h;
+    image_create_info.extent.depth = 1;
+    image_create_info.mipLevels = 1;
+    image_create_info.arrayLayers = 1;
+    image_create_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    if (vkCreateImage(_vk.device, &image_create_info, nullptr, &(_vk.media360.image)) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create image\n");
+        return;
+    }
+
+    // Allocate memory
+    VkMemoryRequirements mem_reqs;
+    vkGetImageMemoryRequirements(_vk.device, _vk.media360.image, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = findMemoryType(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(_vk.device, &alloc_info, nullptr, &(_vk.media360.memory));
+    vkBindImageMemory(_vk.device, _vk.media360.image, _vk.media360.memory, 0);
+
+    // Transfer pixel buffer to GPU image
+    VkCommandBufferAllocateInfo cmd_alloc_info{};
+    cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmd_alloc_info.commandPool = _vk.pool;
+    cmd_alloc_info.commandBufferCount = 1;
+
+    VkCommandBuffer upload_cmd;
+    vkAllocateCommandBuffers(_vk.device, &cmd_alloc_info, &upload_cmd);
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(upload_cmd, &begin_info);
+
+    VkImageMemoryBarrier barrier_to_upload{};
+    barrier_to_upload.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier_to_upload.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier_to_upload.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier_to_upload.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier_to_upload.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier_to_upload.srcAccessMask = 0;
+    barrier_to_upload.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier_to_upload.image = _vk.media360.image;
+    barrier_to_upload.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier_to_upload.subresourceRange.baseMipLevel = 0;
+    barrier_to_upload.subresourceRange.levelCount = 1;
+    barrier_to_upload.subresourceRange.baseArrayLayer = 0;
+    barrier_to_upload.subresourceRange.layerCount = 1;
+
+    vkCmdPipelineBarrier(upload_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier_to_upload);
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = { 0, 0, 0 };
+    region.imageExtent = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 };
+
+    vkCmdCopyBufferToImage(upload_cmd, buffer, _vk.media360.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &region);
+
+    VkImageMemoryBarrier barrier_to_sample{};
+    barrier_to_sample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier_to_sample.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier_to_sample.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier_to_sample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier_to_sample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier_to_sample.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier_to_sample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier_to_sample.image = _vk.media360.image;
+    barrier_to_sample.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier_to_sample.subresourceRange.baseMipLevel = 0;
+    barrier_to_sample.subresourceRange.levelCount = 1;
+    barrier_to_sample.subresourceRange.baseArrayLayer = 0;
+    barrier_to_sample.subresourceRange.layerCount = 1;
+
+    vkCmdPipelineBarrier(upload_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier_to_sample);
+
+    vkEndCommandBuffer(upload_cmd);
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &upload_cmd;
+
+    // Submit to your graphics or transfer queue and wait for it to finish
+    vkQueueSubmit(_vk.queue, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(_vk.queue);
+
+    // Free temp structures
+    vkFreeCommandBuffers(_vk.device, _vk.pool, 1, &upload_cmd);
+    vkDestroyBuffer(_vk.device, buffer, nullptr);
+    vkFreeMemory(_vk.device, buffer_mem, nullptr);
+
+    // Create image view
+    VkImageViewCreateInfo view_create_info{};
+    view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_create_info.image = _vk.media360.image;
+    view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_create_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    view_create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_create_info.subresourceRange.baseMipLevel = 0;
+    view_create_info.subresourceRange.levelCount = 1;
+    view_create_info.subresourceRange.baseArrayLayer = 0;
+    view_create_info.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(_vk.device, &view_create_info, nullptr, &(_vk.media360.view)) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create image view\n");
+        return;
+    }
+
+    // Create texture sampler
+    VkSamplerCreateInfo sampler_create_info{};
+    sampler_create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_create_info.magFilter = VK_FILTER_LINEAR;
+    sampler_create_info.minFilter = VK_FILTER_LINEAR;
+    sampler_create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create_info.anisotropyEnable = VK_FALSE;
+    sampler_create_info.maxAnisotropy = 1.0f;
+    sampler_create_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_create_info.unnormalizedCoordinates = VK_FALSE;
+    sampler_create_info.compareEnable = VK_FALSE;
+    sampler_create_info.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_create_info.mipLodBias = 0.0f;
+    sampler_create_info.minLod = 0.0f;
+    sampler_create_info.maxLod = 1.0f;
+
+    if (vkCreateSampler(_vk.device, &sampler_create_info, nullptr, &(_vk.media360.sampler)) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create texture sampler\n");
+        return;
+    }
+
+    _vk.media360.stereo = is_stereo;
+}
+
+int vk360::Vulkan360::drawTestScreen()
 {
     // Get back buffer - resources to render image into
     VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
@@ -328,7 +549,7 @@ int vk360::Vulkan360::drawFrame()
     }
 
     //
-    // TEST - clear each eye a different color
+    // Begin: Render (clear each eye a different color)
     //
     VkImageMemoryBarrier barrier_to_clear{};
     barrier_to_clear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -381,11 +602,11 @@ int vk360::Vulkan360::drawFrame()
 
     if (vkEndCommandBuffer(buf.cmd) != VK_SUCCESS)
     {
-        throw std::runtime_error("Failed to record command buffer!");
+        throw std::runtime_error("Vulkan360> Error: failed to record command buffer!");
     }
 
     //
-    // End: TEST
+    // End: Render
     //
 
 
@@ -405,6 +626,63 @@ int vk360::Vulkan360::drawFrame()
     submit_info.pSignalSemaphores = signal_semaphores;
 
     if (vkQueueSubmit(_vk.queue, 1, &submit_info, buf.in_flight_fence)  != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
+    }
+
+    int render_buf_idx = _vk.render_buffer_index;
+    _vk.render_buffer_index = 1 - _vk.render_buffer_index; // toggle between 0 and 1
+
+    return render_buf_idx;
+}
+
+int vk360::Vulkan360::drawMonoImage(float rotation)
+{
+    // Get back buffer - resources to render image into
+    VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
+
+    // Wait for prior frame resources to be available to overwrite
+    vkWaitForFences(_vk.device, 1, &buf.in_flight_fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(_vk.device, 1, &buf.in_flight_fence);
+
+    // Reset command buffer
+    vkResetCommandBuffer(buf.cmd, 0);
+
+    // Record draw commands
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    if (vkBeginCommandBuffer(buf.cmd, &begin_info) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to begin recording command buffer\n");
+    }
+
+    //
+    // Begin: Render (draw full screen quad)
+    //
+
+    //
+    // End: Render
+    //
+
+
+    // Submit your recorded drawing commands
+    VkSemaphore wait_semaphores[] = { buf.sem_vk_available.semaphore };
+    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
+    VkSemaphore signal_semaphores[] = { buf.sem_vk_finished.semaphore };
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = wait_semaphores;
+    submit_info.pWaitDstStageMask = wait_stages;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &buf.cmd;
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = signal_semaphores;
+
+    if (vkQueueSubmit(_vk.queue, 1, &submit_info, buf.in_flight_fence) != VK_SUCCESS)
     {
         fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
     }
@@ -657,7 +935,7 @@ void vk360::Vulkan360::createExternalSemaphore(VulkanInteropSemaphore* ext_sem)
 
     // Extract the external handle
 #if defined(_WIN32)
-    VkSemaphoreGetWin32HandleInfoKHR get_handle_info = {};
+    VkSemaphoreGetWin32HandleInfoKHR get_handle_info{};
     get_handle_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR;
     get_handle_info.semaphore = ext_sem->semaphore;
     get_handle_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
@@ -666,7 +944,7 @@ void vk360::Vulkan360::createExternalSemaphore(VulkanInteropSemaphore* ext_sem)
         (PFN_vkGetSemaphoreWin32HandleKHR)vkGetDeviceProcAddr(_vk.device, "vkGetSemaphoreWin32HandleKHR");
     vkGetSemaphoreWin32HandleKHR(_vk.device, &get_handle_info, &(ext_sem->external_handle));
 #elif defined(__linux__)
-    VkSemaphoreGetFdInfoKHR get_fd_info = {};
+    VkSemaphoreGetFdInfoKHR get_fd_info{};
     get_fd_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
     get_fd_info.semaphore = ext_sem->semaphore;
     get_fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
@@ -693,7 +971,7 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
 #endif
 
     // Setup the Image
-    VkImageCreateInfo image_info = {};
+    VkImageCreateInfo image_info{};
     VkImageUsageFlags usage_flags = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (format == VK_FORMAT_R8G8B8A8_UNORM)
     {
@@ -726,7 +1004,7 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     vkGetImageMemoryRequirements(_vk.device, ext_img->vk_img_data.image, &mem_reqs);
 
     // Define the Export info
-    VkExportMemoryAllocateInfo export_info = {};
+    VkExportMemoryAllocateInfo export_info{};
     export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
 #if defined(_WIN32)
     export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
@@ -737,7 +1015,7 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
 #endif
     export_info.pNext = nullptr;
 
-    VkMemoryAllocateInfo alloc_info = {};
+    VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_info.allocationSize = mem_reqs.size;
     alloc_info.memoryTypeIndex = findMemoryType(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -749,7 +1027,7 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     // Extract the external handle
 #if defined (_WIN32)
     ext_img->external_handle = nullptr;
-    VkMemoryGetWin32HandleInfoKHR get_handle_info = {};
+    VkMemoryGetWin32HandleInfoKHR get_handle_info{};
     get_handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
     get_handle_info.memory = ext_img->vk_img_data.memory;
     get_handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
@@ -758,7 +1036,7 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     vkGetMemoryWin32HandleKHR(_vk.device, &get_handle_info, &(ext_img->external_handle));
 #elif defined(__linux__)
     image->external_handle = -1;
-    VkMemoryGetFdInfoKHR get_fd_info = {};
+    VkMemoryGetFdInfoKHR get_fd_info{};
     get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
     get_fd_info.memory = image->vk_img_data.memory;
     get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;

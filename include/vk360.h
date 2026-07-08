@@ -87,6 +87,13 @@ namespace vk360 {
         int external_handle = 0;
 #endif
     };
+    struct VulkanTexture {
+        VkImage image = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+        bool stereo = false;
+    };
 
     class Vulkan360 {
     private:
@@ -106,6 +113,7 @@ namespace vk360 {
             VkCommandPool pool;
             VulkanRenderBuffer render_buffer[2];
             int render_buffer_index;
+            VulkanTexture media360;
         };
 
         VulkanData _vk;
@@ -137,6 +145,9 @@ namespace vk360 {
         void getExternalSignalAvailableSemaphoreHandle(uint32_t index, int* ext_handle);
         void getExternalWaitFinishedSemaphoreHandle(uint32_t index, int* ext_handle);
 #endif
-        int drawFrame();
+        void loadImage(const char* path, bool is_stereo);
+        int drawTestScreen();
+        int drawMonoImage(float rotation);
+        int drawStereoImage(float rotation);
     };
 }

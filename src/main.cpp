@@ -24,30 +24,6 @@ typedef HANDLE ExternalHandle;
 typedef int ExternalHandle;
 #endif
 
-enum DisplayBaseShape : uint8_t { BASE_SHAPE_PLANE, BASE_SHAPE_CYLINDER };
-
-struct DisplaySurface {
-    DisplayBaseShape base_shape;
-};
-
-struct DisplayPlaneSurface : DisplaySurface {
-    double size[2];
-    double center[3];
-    double normal[3];
-};
-
-struct DisplayCylinderSurface : DisplaySurface {
-    double radius;
-    double altitude[2];
-    double sub_angle[2];
-};
-
-struct DisplayConfig {
-    int monitor_index;
-    std::vector<DisplaySurface*> surfaces;
-    double origin[3];
-};
-
 struct PresentData {
     GLuint render_image;
     GLuint sem_signal_available;
@@ -56,7 +32,6 @@ struct PresentData {
 };
 
 // Function definitions
-bool readOmniSurfaceConfigFile(const char* filename, DisplayConfig* config_ptr);
 GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* width, int* height, bool* is_stereo);
 void importExternalTextureArray(vk360::ExternalImageInfo& ext_img_info, GLuint* texture);
 void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore);
@@ -136,6 +111,8 @@ int main()
     GLenum draw_buffer_index[2] = { GL_BACK_LEFT, GL_BACK_RIGHT };
     if (!is_stereo) draw_buffer_index[0] = GL_BACK;
 
+    app->loadImage("resrc/images/SampleOmni3D.png", true);
+
     // Main render loop
     GLuint buffers[1];
     GLenum layouts[1] = { GL_LAYOUT_GENERAL_EXT };
@@ -151,7 +128,7 @@ int main()
         }
 
         // Trigger render (Vulkan)
-        uint32_t buffer_idx = app->drawFrame();
+        uint32_t buffer_idx = app->drawTestScreen();
 
         // Wait for Vulkan to signal render is complete
         buffers[0] = present[buffer_idx].render_image;
@@ -177,153 +154,6 @@ int main()
 
     return EXIT_SUCCESS;
 }
-
-bool readOmniSurfaceConfigFile(const char* filename, DisplayConfig* config_ptr)
-{
-    std::ifstream config_file(filename);
-    if (!config_file.is_open())
-    {
-        fprintf(stderr, "OmniSurface> Error: config file '%s' not found'\n", filename);
-        return false;
-    }
-
-    std::string line;
-    bool line0 = true;
-    uint32_t surface_idx = 0;
-    while (std::getline(config_file, line))
-    {
-        if (line0 && line != "OmniSurface Config")
-        {
-            fprintf(stderr, "OmniSurface> Error: config file format not recognized - 1st line should be 'OmniSurface Config'\n");
-            return false;
-        }
-        else if (line.length() >= 10 && line.substr(0, 9) == "Monitor: ")
-        {
-            config_ptr->monitor_index = std::stoi(line.substr(9));
-        }
-        else if (line.length() >= 16 && line.substr(0, 15) == "Surface Count: ")
-        {
-            config_ptr->surfaces.resize(std::stoull(line.substr(15)));
-        }
-        else if (line.length() >= 1 && line.substr(0, 1) == "[")
-        {
-            if (surface_idx >= config_ptr->surfaces.size())
-            {
-                fprintf(stderr, "OmniSurface> Error: config file  read error - found more surfaces than declared count\n");
-                return false;
-            }
-            DisplayPlaneSurface* surf_plane;
-            DisplayCylinderSurface* surf_cylinder;
-            while (std::getline(config_file, line) && (line.length() < 1 || line.substr(0, 1) != "]"))
-            {
-                if (line.length() >= 13 && line.substr(0, 12) == "Base Shape: ")
-                {
-                    std::string shape = line.substr(12);
-                    if (shape == "plane")
-                    {
-                        surf_plane = new DisplayPlaneSurface();
-                        surf_plane->base_shape = DisplayBaseShape::BASE_SHAPE_PLANE;
-                        config_ptr->surfaces[surface_idx] = surf_plane;
-                    }
-                    else if (shape == "cylinder")
-                    {
-                        surf_cylinder = new DisplayCylinderSurface();
-                        surf_cylinder->base_shape = DisplayBaseShape::BASE_SHAPE_CYLINDER;
-                        config_ptr->surfaces[surface_idx] = surf_cylinder;
-                    }
-                    else
-                    {
-                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - Base Shape must be 'plane' or 'cylinder'\n");
-                        return false;
-                    }
-                }
-                else if (line.length() >= 8 && line.substr(0, 7) == "Width: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_PLANE)
-                {
-                    surf_plane->size[0] = std::stod(line.substr(7));
-                }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Height: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_PLANE)
-                {
-                    surf_plane->size[1] = std::stod(line.substr(8));
-                }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Center: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_PLANE)
-                {
-                    size_t comma1 = line.find(',');
-                    size_t comma2 = line.find(',', comma1 + 1);
-                    if (comma1 == std::string::npos || comma2 == std::string::npos)
-                    {
-                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - Center expexts 3 comma separated numbers\n");
-                        return false;
-                    }
-                    surf_plane->center[0] = std::stod(line.substr(8, comma1));
-                    surf_plane->center[1] = std::stod(line.substr(comma1 + 1, comma2 - comma1 - 1));
-                    surf_plane->center[2] = std::stod(line.substr(comma2 + 1));
-                }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Normal: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_PLANE)
-                {
-                    size_t comma1 = line.find(',');
-                    size_t comma2 = line.find(',', comma1 + 1);
-                    if (comma1 == std::string::npos || comma2 == std::string::npos)
-                    {
-                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - Normal expexts 3 comma separated numbers\n");
-                        return false;
-                    }
-                    surf_plane->center[0] = std::stod(line.substr(8, comma1));
-                    surf_plane->center[1] = std::stod(line.substr(comma1 + 1, comma2 - comma1 - 1));
-                    surf_plane->center[2] = std::stod(line.substr(comma2 + 1));
-                }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Radius: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_CYLINDER)
-                {
-                    surf_cylinder->radius = std::stod(line.substr(8));
-                }
-                else if (line.length() >= 16 && line.substr(0, 15) == "Bottom Height: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_CYLINDER)
-                {
-                    surf_cylinder->altitude[0] = std::stod(line.substr(15));
-                }
-                else if (line.length() >= 13 && line.substr(0, 12) == "Top Height: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_CYLINDER)
-                {
-                    surf_cylinder->altitude[1] = std::stod(line.substr(12));
-                }
-                else if (line.length() >= 13 && line.substr(0, 12) == "Left Angle: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_CYLINDER)
-                {
-                    surf_cylinder->sub_angle[0] = std::stod(line.substr(12));
-                }
-                else if (line.length() >= 14 && line.substr(0, 13) == "Right Angle: " &&
-                    config_ptr->surfaces[surface_idx]->base_shape == DisplayBaseShape::BASE_SHAPE_CYLINDER)
-                {
-                    surf_cylinder->sub_angle[1] = std::stod(line.substr(13));
-                }
-            }
-            surface_idx++;
-        }
-        else if (line.length() >= 9 && line.substr(0, 8) == "Origin: ")
-        {
-            size_t comma1 = line.find(',');
-            size_t comma2 = line.find(',', comma1 + 1);
-            if (comma1 == std::string::npos || comma2 == std::string::npos)
-            {
-                fprintf(stderr, "OmniSurface> Error: config file format not recognized - Normal expexts 3 comma separated numbers\n");
-                return false;
-            }
-            config_ptr->origin[0] = std::stod(line.substr(8, comma1));
-            config_ptr->origin[1] = std::stod(line.substr(comma1 + 1, comma2 - comma1 - 1));
-            config_ptr->origin[2] = std::stod(line.substr(comma2 + 1));
-        }
-
-        line0 = false;
-    }
-
-    config_file.close();
-    return true;
-}
-
 
 GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* width, int* height, bool* is_stereo)
 {
