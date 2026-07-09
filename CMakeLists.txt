@@ -72,6 +72,36 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
 )
 
+# Compile GLSL shaders to SPIR-V
+find_program(SPV_COMPILER NAMES glslangValidator)
+if(SPV_COMPILER)
+    set(SPV_FLAGS_VERT "-V" "-S" "vert")
+    set(SPV_FLAGS_FRAG "-V" "-S" "frag")
+else()
+    find_program(SPV_COMPILER NAMES glslc)
+    set(SPV_FLAGS_VERT "-fshader-stage=vertex")
+    set(SPV_FLAGS_FRAG "-fshader-stage=fragment")
+endif()
+if(SPV_COMPILER)
+    message(STATUS "Using ${SPV_COMPILER} as GLSL to SPIR-V compiler")
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${SPV_COMPILER} ${SPV_FLAGS_VERT}
+            -o ${CMAKE_SOURCE_DIR}/resrc/shaders/equirect_nonplanar_vert.glsl.spv
+            ${CMAKE_SOURCE_DIR}/resrc/shaders/equirect_nonplanar_vert.glsl
+        COMMAND ${SPV_COMPILER} ${SPV_FLAGS_FRAG}
+            -o ${CMAKE_SOURCE_DIR}/resrc/shaders/equirect_nonplanar_frag.glsl.spv
+            ${CMAKE_SOURCE_DIR}/resrc/shaders/equirect_nonplanar_frag.glsl
+        COMMENT "Compiling FSR1 GLSL shaders to SPIR-V"
+    )
+else()
+    message(WARNING "Warning: no GLSL to SPIR-V compiler found. Please install glslangValidator or glslc.")
+endif()
+unset(SPV_COMPILER CACHE)
+unset(SPV_FLAGS_VERT CACHE)
+unset(SPV_FLAGS_FRAG CACHE)
+
+# Copy 'resrc' directory to output
 add_custom_command(
     TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
