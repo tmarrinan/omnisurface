@@ -1,0 +1,25 @@
+OmniSurface Config
+Monitor: 0
+Surface Count: 3
+[
+  Base Shape: plane
+  Width: 1.0
+  Height: 1.875
+  Center: -1.0, 0.9375, -0.5
+  Normal: 1.0, 0.0, 0.0
+]
+[
+  Base Shape: plane
+  Width: 1.0
+  Height: 1.875
+  Center: 0.0, 0.9375, -1.0
+  Normal: 0.0, 0.0, 1.0
+]
+[
+  Base Shape: plane
+  Width: 1.0
+  Height: 1.875
+  Center: 1.0, 0.9375, -0.5
+  Normal: -1.0, 0.0, 0.0
+]
+Origin: 0.0, 0.0, 0.0

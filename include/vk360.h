@@ -92,6 +92,7 @@ namespace vk360 {
         VkImageView view = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
+        VkDescriptorSet desc = VK_NULL_HANDLE;
         bool stereo = false;
     };
 
@@ -115,6 +116,7 @@ namespace vk360 {
             int render_buffer_index;
             VkRenderPass render_pass;
             VkDescriptorSetLayout desc_layout;
+            VkDescriptorPool desc_pool;
             VkPipeline pipeline;
             VkPipelineLayout pipeline_layout;
             VulkanTexture media360;
@@ -135,7 +137,7 @@ namespace vk360 {
         void createExternalSemaphore(VulkanInteropSemaphore* ext_sem);
         void createExternalImage(uint32_t width, uint32_t height, uint32_t layers, VkFormat format, VulkanInteropImage* ext_img);
         void createRenderPass(VkRenderPass* render_pass_ptr);
-        void createDescriptorSetLayout(VkDescriptorSetLayout* desc_layout_ptr);
+        void createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* desc_layout_ptr, VkDescriptorPool* desc_pool_ptr);
         void createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr);
         int findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
         void transitionImageLayoutToGeneral(VkImage image, VkFormat format, uint32_t layers);

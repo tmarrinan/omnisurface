@@ -270,7 +270,7 @@ vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t heigh
     }
     vkQueueWaitIdle(_vk.queue);
     createRenderPass(&_vk.render_pass);
-    createDescriptorSetLayout(&_vk.desc_layout);
+    createDescriptorSetLayoutAndPool(&_vk.desc_layout, &_vk.desc_pool);
     createGraphicsPipeline(&_vk.pipeline, &_vk.pipeline_layout);
 
     _vk.render_buffer_index = 0;
@@ -315,6 +315,7 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
     {
         vkDeviceWaitIdle(_vk.device);
 
+        vkFreeDescriptorSets(_vk.device, _vk.desc_pool, 1, &_vk.media360.desc);
         vkDestroySampler(_vk.device, _vk.media360.sampler, nullptr);
         vkDestroyImageView(_vk.device, _vk.media360.view, nullptr);
         vkDestroyImage(_vk.device, _vk.media360.image, nullptr);
@@ -526,6 +527,35 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
         return;
     }
 
+    // Create descriptor set
+    VkDescriptorSetAllocateInfo desc_alloc_info{};
+    desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    desc_alloc_info.descriptorPool = _vk.desc_pool;
+    desc_alloc_info.descriptorSetCount = 1;
+    desc_alloc_info.pSetLayouts = &_vk.desc_layout;
+
+    if (vkAllocateDescriptorSets(_vk.device, &desc_alloc_info, &_vk.media360.desc) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to allocate descriptor set\n");
+        return;
+    }
+
+    VkDescriptorImageInfo desc_image_info{};
+    desc_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    desc_image_info.imageView = _vk.media360.view;
+    desc_image_info.sampler = _vk.media360.sampler;
+
+    VkWriteDescriptorSet desc_write{};
+    desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    desc_write.dstSet = _vk.media360.desc;
+    desc_write.dstBinding = 0; // layout(binding = 0)
+    desc_write.dstArrayElement = 0;
+    desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    desc_write.descriptorCount = 1;
+    desc_write.pImageInfo = &desc_image_info;
+
+    vkUpdateDescriptorSets(_vk.device, 1, &desc_write, 0, nullptr);
+
     _vk.media360.stereo = is_stereo;
 }
 
@@ -664,6 +694,16 @@ int vk360::Vulkan360::drawMonoImage(float rotation)
     //
     // Begin: Render (draw full screen quad)
     //
+
+    // TODO: Begin Render Pass, Bind Pipeline ...
+
+    // Draw fullscreen quad
+    vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout,
+        0, 1, &_vk.media360.desc, 0, nullptr);
+
+    vkCmdDraw(buf.cmd, 6, 1, 0, 0);
+
+    // TODO: End Render Pass ...
 
     //
     // End: Render
@@ -1104,7 +1144,7 @@ void vk360::Vulkan360::createRenderPass(VkRenderPass* render_pass_ptr)
     }
 }
 
-void vk360::Vulkan360::createDescriptorSetLayout(VkDescriptorSetLayout* desc_layout_ptr)
+void vk360::Vulkan360::createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* desc_layout_ptr, VkDescriptorPool* desc_pool_ptr)
 {
     VkDescriptorSetLayoutBinding sampler_layout_binding{};
     sampler_layout_binding.binding = 0;
@@ -1122,14 +1162,47 @@ void vk360::Vulkan360::createDescriptorSetLayout(VkDescriptorSetLayout* desc_lay
     {
         fprintf(stderr, "Vulkan360> Error: failed to create `VkDescriptorSetLayout`\n");
         desc_layout_ptr = nullptr;
+        desc_pool_ptr = nullptr;
+        return;
+    }
+
+    VkDescriptorPoolSize pool_size{};
+    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = 2;
+
+    VkDescriptorPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    pool_info.poolSizeCount = 1;
+    pool_info.pPoolSizes = &pool_size;
+    pool_info.maxSets = 2;
+
+    if (vkCreateDescriptorPool(_vk.device, &pool_info, nullptr, desc_pool_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkDescriptorPool`\n");
+        desc_layout_ptr = nullptr;
+        desc_pool_ptr = nullptr;
+        return;
     }
 }
 
 void vk360::Vulkan360::createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr)
 {
     // Create Pipeline Layout
-    //  - push constants? uniforms?
-    // TODO
+    VkPipelineLayoutCreateInfo pipeline_layout_info{};
+    pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_layout_info.setLayoutCount = 1;
+    pipeline_layout_info.pSetLayouts = &_vk.desc_layout;
+    pipeline_layout_info.pushConstantRangeCount = 0;
+    pipeline_layout_info.pPushConstantRanges = nullptr;
+
+    if (vkCreatePipelineLayout(_vk.device, &pipeline_layout_info, nullptr, pipeline_layout_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkPipelineLayout`\n");
+        pipeline_layout_ptr = nullptr;
+        pipeline_ptr = nullptr;
+        return;
+    }
 
     // Load vertex and fragment shaders
     VkShaderModule vertex_shader, fragment_shader;
@@ -1137,7 +1210,85 @@ void vk360::Vulkan360::createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipeli
     loadShaderModule("resrc/shaders/equirect_nonplanar_frag.glsl.spv", &fragment_shader);
 
     // Create Pipeline
-    // TODO
+    VkPipelineShaderStageCreateInfo shader_stage_info[2]{};
+    shader_stage_info[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_stage_info[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    shader_stage_info[0].module = vertex_shader;
+    shader_stage_info[0].pName = "main";
+
+    shader_stage_info[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_stage_info[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shader_stage_info[1].module = fragment_shader;
+    shader_stage_info[1].pName = "main";
+
+    VkPipelineVertexInputStateCreateInfo vertex_input_info{};
+    vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertex_input_info.vertexBindingDescriptionCount = 0;
+    vertex_input_info.vertexAttributeDescriptionCount = 0;
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly{};
+    input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    input_assembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(_width), static_cast<float>(_height), 0.0f, 1.0f };
+    VkRect2D scissor{ {0, 0}, {_width, _height} };
+
+    VkPipelineViewportStateCreateInfo viewport_state_info{};
+    viewport_state_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state_info.viewportCount = 1;
+    viewport_state_info.pViewports = &viewport;
+    viewport_state_info.scissorCount = 1;
+    viewport_state_info.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer_info{};
+    rasterizer_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer_info.depthClampEnable = VK_FALSE;
+    rasterizer_info.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer_info.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer_info.lineWidth = 1.0f;
+    rasterizer_info.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling_info{};
+    multisampling_info.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling_info.sampleShadingEnable = VK_FALSE;
+    multisampling_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment{};
+    color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    color_blend_attachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo color_blend_info{};
+    color_blend_info.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blend_info.attachmentCount = 1;
+    color_blend_info.pAttachments = &color_blend_attachment;
+
+    VkGraphicsPipelineCreateInfo pipeline_info{};
+    pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_info.stageCount = 2;
+    pipeline_info.pStages = shader_stage_info;
+    pipeline_info.pVertexInputState = &vertex_input_info;
+    pipeline_info.pInputAssemblyState = &input_assembly;
+    pipeline_info.pViewportState = &viewport_state_info;
+    pipeline_info.pRasterizationState = &rasterizer_info;
+    pipeline_info.pMultisampleState = &multisampling_info;
+    pipeline_info.pColorBlendState = &color_blend_info;
+    pipeline_info.layout = *pipeline_layout_ptr;
+    pipeline_info.renderPass = _vk.render_pass;
+    pipeline_info.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(_vk.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, pipeline_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkPipeline`\n");
+        pipeline_layout_ptr = nullptr;
+        pipeline_ptr = nullptr;
+        return;
+    }
+
+    vkDestroyShaderModule(_vk.device, vertex_shader, nullptr);
+    vkDestroyShaderModule(_vk.device, fragment_shader, nullptr);
 }
 
 int vk360::Vulkan360::findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties)
