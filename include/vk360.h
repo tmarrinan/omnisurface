@@ -104,8 +104,10 @@ namespace vk360 {
             VulkanInteropSemaphore sem_vk_finished;
             VkFence in_flight_fence;
             VulkanInteropImage image;
+            VkFramebuffer framebuffer;
         };
         struct VulkanData {
+            VkExtent2D extent;
             VkInstance instance;
             VkPhysicalDevice physical_device;
             int q_family_index;
@@ -123,8 +125,6 @@ namespace vk360 {
         };
 
         VulkanData _vk;
-        uint32_t _width;
-        uint32_t _height;
         bool _is_stereo;
 
         void createVulkanInstance(VkInstance* instance_ptr);
@@ -136,7 +136,8 @@ namespace vk360 {
         void createSyncObjects(VulkanInteropSemaphore* img_available_ptr, VulkanInteropSemaphore* img_finished_ptr, VkFence* in_flight_ptr);
         void createExternalSemaphore(VulkanInteropSemaphore* ext_sem);
         void createExternalImage(uint32_t width, uint32_t height, uint32_t layers, VkFormat format, VulkanInteropImage* ext_img);
-        void createRenderPass(VkRenderPass* render_pass_ptr);
+        void createFramebuffer(VulkanImageData& image, VkFramebuffer* framebuffer_ptr);
+        void createRenderPass(VkFormat color_format, VkRenderPass* render_pass_ptr);
         void createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* desc_layout_ptr, VkDescriptorPool* desc_pool_ptr);
         void createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr);
         int findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);

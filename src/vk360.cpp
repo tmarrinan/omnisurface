@@ -244,33 +244,35 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 
 
 vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo) :
-    _width{ width }, _height{ height }, _is_stereo{ is_stereo }
-    
+    _is_stereo{ is_stereo }
 {
+    _vk.extent.width = width;
+    _vk.extent.height = height;
+    VkFormat fbo_color_format = VK_FORMAT_R8G8B8A8_SRGB;
     createVulkanInstance(&_vk.instance);
     findPhysicalDevice(device_uuid, &_vk.physical_device, &_vk.q_family_index);
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
     createCommandPool(&_vk.pool);
+    createRenderPass(fbo_color_format, &_vk.render_pass);
+    createDescriptorSetLayoutAndPool(&_vk.desc_layout, &_vk.desc_pool);
     for (uint32_t i = 0; i < 2; i++)
     {
         VulkanRenderBuffer& buf = _vk.render_buffer[i];
         createCommandBuffer(&buf.cmd);
         createSyncObjects(&buf.sem_vk_available, &buf.sem_vk_finished, &buf.in_flight_fence);
-        createExternalImage(_width, _height, _is_stereo ? 2 : 1, VK_FORMAT_R8G8B8A8_UNORM, &buf.image);
+        createExternalImage(_vk.extent.width, _vk.extent.height, _is_stereo ? 2 : 1, fbo_color_format, &buf.image);
+        createFramebuffer(buf.image.vk_img_data, &buf.framebuffer);
 
         VkSubmitInfo prime_submit{};
         prime_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         prime_submit.signalSemaphoreCount = 1;
         prime_submit.pSignalSemaphores = &_vk.render_buffer[i].sem_vk_available.semaphore;
-        VkResult r = vkQueueSubmit(_vk.queue, 1, &prime_submit, VK_NULL_HANDLE);
-        if (r != VK_SUCCESS)
+        if (vkQueueSubmit(_vk.queue, 1, &prime_submit, VK_NULL_HANDLE) != VK_SUCCESS)
         {
-            fprintf(stderr, "ERROR: %d\n", r);
+            fprintf(stderr, "Vulkan360> Error: failed to signal interop semaphore\n");
         }
     }
     vkQueueWaitIdle(_vk.queue);
-    createRenderPass(&_vk.render_pass);
-    createDescriptorSetLayoutAndPool(&_vk.desc_layout, &_vk.desc_pool);
     createGraphicsPipeline(&_vk.pipeline, &_vk.pipeline_layout);
 
     _vk.render_buffer_index = 0;
@@ -635,7 +637,7 @@ int vk360::Vulkan360::drawTestScreen()
 
     if (vkEndCommandBuffer(buf.cmd) != VK_SUCCESS)
     {
-        throw std::runtime_error("Vulkan360> Error: failed to record command buffer!");
+        fprintf(stderr, "Vulkan360> Error: failed to record command buffer\n");
     }
 
     //
@@ -695,7 +697,24 @@ int vk360::Vulkan360::drawMonoImage(float rotation)
     // Begin: Render (draw full screen quad)
     //
 
-    // TODO: Begin Render Pass, Bind Pipeline ...
+    // Configure the render pass execution
+    VkClearValue clear_color = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+
+    VkRenderPassBeginInfo render_pass_info{};
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_info.renderPass = _vk.render_pass;
+    render_pass_info.framebuffer = buf.framebuffer;
+    render_pass_info.renderArea.offset = { 0, 0 };
+    render_pass_info.renderArea.extent = _vk.extent;
+    render_pass_info.clearValueCount = 1;
+    render_pass_info.pClearValues = &clear_color;
+     
+    // Start the render pass
+    vkCmdBeginRenderPass(buf.cmd, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+
+    // Bind graphics pipeline
+    vkCmdBindPipeline(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline);
+    vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout, 0, 1, &_vk.media360.desc, 0, nullptr);
 
     // Draw fullscreen quad
     vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout,
@@ -703,7 +722,13 @@ int vk360::Vulkan360::drawMonoImage(float rotation)
 
     vkCmdDraw(buf.cmd, 6, 1, 0, 0);
 
-    // TODO: End Render Pass ...
+    // End the render pass
+    vkCmdEndRenderPass(buf.cmd);
+
+    if (vkEndCommandBuffer(buf.cmd) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to record command buffer\n");
+    }
 
     //
     // End: Render
@@ -1015,19 +1040,6 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
 
     // Setup the Image
     VkImageCreateInfo image_info{};
-    VkImageUsageFlags usage_flags = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (format == VK_FORMAT_R8G8B8A8_UNORM)
-    {
-        usage_flags |= VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    }
-    else if (format == VK_FORMAT_D32_SFLOAT)
-    {
-        usage_flags |= VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    }
-    else if (format == VK_FORMAT_D24_UNORM_S8_UINT)
-    {
-        usage_flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    }
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.pNext = &ext_image_info;
     image_info.imageType = VK_IMAGE_TYPE_2D;
@@ -1039,7 +1051,8 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    image_info.usage = usage_flags;
+    image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
     vkCreateImage(_vk.device, &image_info, nullptr, &(ext_img->vk_img_data.image));
 
@@ -1097,12 +1110,50 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     ext_img->vk_img_data.layers = layers;
 
     transitionImageLayoutToGeneral(ext_img->vk_img_data.image, ext_img->vk_img_data.format, ext_img->vk_img_data.layers);
+
+    // Create image view
+    VkImageViewCreateInfo view_info{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = ext_img->vk_img_data.image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = format;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = layers;
+    view_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+    if (vkCreateImageView(_vk.device, &view_info, nullptr, &(ext_img->vk_img_data.view)) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkImageView`\n");
+    }
 }
 
-void vk360::Vulkan360::createRenderPass(VkRenderPass* render_pass_ptr)
+void vk360::Vulkan360::createFramebuffer(VulkanImageData& image, VkFramebuffer* framebuffer_ptr)
+{
+    VkFramebufferCreateInfo framebuffer_info{};
+    framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebuffer_info.renderPass = _vk.render_pass;
+    framebuffer_info.attachmentCount = 1;
+    framebuffer_info.pAttachments = &image.view;
+    framebuffer_info.width = _vk.extent.width;
+    framebuffer_info.height = _vk.extent.height;
+    framebuffer_info.layers = _is_stereo ? 2 : 1;
+
+    if (vkCreateFramebuffer(_vk.device, &framebuffer_info, nullptr, framebuffer_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to create `VkFramebuffer`\n");
+    }
+}
+
+void vk360::Vulkan360::createRenderPass(VkFormat color_format, VkRenderPass* render_pass_ptr)
 {
     VkAttachmentDescription color_attachment{};
-    color_attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+    color_attachment.format = color_format;
     color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
     color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1231,8 +1282,8 @@ void vk360::Vulkan360::createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipeli
     input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     input_assembly.primitiveRestartEnable = VK_FALSE;
 
-    VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(_width), static_cast<float>(_height), 0.0f, 1.0f };
-    VkRect2D scissor{ {0, 0}, {_width, _height} };
+    VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(_vk.extent.width), static_cast<float>(_vk.extent.height), 0.0f, 1.0f };
+    VkRect2D scissor{ {0, 0}, _vk.extent };
 
     VkPipelineViewportStateCreateInfo viewport_state_info{};
     viewport_state_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;

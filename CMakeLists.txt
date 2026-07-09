@@ -92,7 +92,7 @@ if(SPV_COMPILER)
         COMMAND ${SPV_COMPILER} ${SPV_FLAGS_FRAG}
             -o ${CMAKE_SOURCE_DIR}/resrc/shaders/equirect_nonplanar_frag.glsl.spv
             ${CMAKE_SOURCE_DIR}/resrc/shaders/equirect_nonplanar_frag.glsl
-        COMMENT "Compiling FSR1 GLSL shaders to SPIR-V"
+        COMMENT "Compiling OmniSurface Vulkan360 GLSL shaders to SPIR-V"
     )
 else()
     message(WARNING "Warning: no GLSL to SPIR-V compiler found. Please install glslangValidator or glslc.")

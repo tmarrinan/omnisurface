@@ -128,7 +128,8 @@ int main()
         }
 
         // Trigger render (Vulkan)
-        uint32_t buffer_idx = app->drawTestScreen();
+        //uint32_t buffer_idx = app->drawTestScreen();
+        uint32_t buffer_idx = app->drawMonoImage(0.0);
 
         // Wait for Vulkan to signal render is complete
         buffers[0] = present[buffer_idx].render_image;
@@ -143,7 +144,7 @@ int main()
             glReadBuffer(GL_COLOR_ATTACHMENT0);
             glDrawBuffer(draw_buffer_index[i]);
 
-            glBlitFramebuffer(0, 0, window_w, window_h, 0, 0, window_w, window_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBlitFramebuffer(0, 0, window_w, window_h, 0, window_h, window_w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         }
         glfwSwapBuffers(window);
 
@@ -192,9 +193,9 @@ GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* widt
     if (!window)
     {
         glfwWindowHint(GLFW_STEREO, GLFW_FALSE);
-        int win_w = 0.9 * static_cast<double>(mode->width);
-        int win_h = 0.9 * static_cast<double>(mode->height);
-        window = glfwCreateWindow(win_w, win_h, title, nullptr, nullptr);
+        *width = 0.8 * static_cast<double>(mode->width);
+        *height = 0.8 * static_cast<double>(mode->height);
+        window = glfwCreateWindow(*width, *height, title, nullptr, nullptr);
         //window = glfwCreateWindow(mode->width, mode->height, title, monitors[monitor_idx], nullptr);
         if (!window)
         {
