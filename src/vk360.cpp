@@ -253,6 +253,7 @@ vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t heigh
     findPhysicalDevice(device_uuid, &_vk.physical_device, &_vk.q_family_index);
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
     createCommandPool(&_vk.pool);
+    printf("%p\n", _vk.device);
     createRenderPass(fbo_color_format, &_vk.render_pass);
     createDescriptorSetLayoutAndPool(&_vk.desc_layout, &_vk.desc_pool);
     for (uint32_t i = 0; i < 2; i++)
@@ -1115,7 +1116,7 @@ void vk360::Vulkan360::createExternalImage(uint32_t width, uint32_t height, uint
     VkImageViewCreateInfo view_info{};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     view_info.image = ext_img->vk_img_data.image;
-    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     view_info.format = format;
     view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     view_info.subresourceRange.baseMipLevel = 0;
@@ -1179,6 +1180,20 @@ void vk360::Vulkan360::createRenderPass(VkFormat color_format, VkRenderPass* ren
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
+    void* multiview_ptr = nullptr;
+    uint32_t view_mask = 0b11;
+    uint32_t correlation_mask = 0b11;
+    VkRenderPassMultiviewCreateInfo multiview_info{};
+    if (_is_stereo)
+    {
+        multiview_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
+        multiview_info.subpassCount = 1;
+        multiview_info.pViewMasks = &view_mask;
+        multiview_info.correlationMaskCount = 1;
+        multiview_info.pCorrelationMasks = &correlation_mask;
+        multiview_ptr = &multiview_info;
+    }
+
     VkRenderPassCreateInfo render_pass_info{};
     render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     render_pass_info.attachmentCount = 1;
@@ -1187,6 +1202,7 @@ void vk360::Vulkan360::createRenderPass(VkFormat color_format, VkRenderPass* ren
     render_pass_info.pSubpasses = &subpass;
     render_pass_info.dependencyCount = 1;
     render_pass_info.pDependencies = &dependency;
+    render_pass_info.pNext = multiview_ptr;
 
     if (vkCreateRenderPass(_vk.device, &render_pass_info, nullptr, render_pass_ptr) != VK_SUCCESS)
     {

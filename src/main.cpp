@@ -73,6 +73,7 @@ int main()
 
     // Setup Vulkan 360 renderer
     vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, is_stereo);
+    //vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, true);
 
     // Import external data to OpenGL for framebuffer presentation
     PresentData present[2];
