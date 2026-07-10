@@ -253,7 +253,6 @@ vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t heigh
     findPhysicalDevice(device_uuid, &_vk.physical_device, &_vk.q_family_index);
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
     createCommandPool(&_vk.pool);
-    printf("%p\n", _vk.device);
     createRenderPass(fbo_color_format, &_vk.render_pass);
     createDescriptorSetLayoutAndPool(&_vk.desc_layout, &_vk.desc_pool);
     for (uint32_t i = 0; i < 2; i++)
@@ -1143,7 +1142,7 @@ void vk360::Vulkan360::createFramebuffer(VulkanImageData& image, VkFramebuffer* 
     framebuffer_info.pAttachments = &image.view;
     framebuffer_info.width = _vk.extent.width;
     framebuffer_info.height = _vk.extent.height;
-    framebuffer_info.layers = _is_stereo ? 2 : 1;
+    framebuffer_info.layers = 1;
 
     if (vkCreateFramebuffer(_vk.device, &framebuffer_info, nullptr, framebuffer_ptr) != VK_SUCCESS)
     {

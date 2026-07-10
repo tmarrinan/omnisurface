@@ -77,6 +77,7 @@ int main()
 
     // Import external data to OpenGL for framebuffer presentation
     PresentData present[2];
+    uint32_t num_views = is_stereo ? 2 : 1;
     for (uint32_t i = 0; i < 2; i++)
     {
         vk360::ExternalImageInfo render_buffer_info;
@@ -90,9 +91,9 @@ int main()
         importExternalSemaphore(sem_available_handle, &(present[i].sem_signal_available));
         importExternalSemaphore(sem_finished_handle, &(present[i].sem_wait_finished));
 
-        for (uint32_t j = 0; j < (is_stereo ? 2 : 1); j++)
+        glGenFramebuffers(num_views, present[i].fbo);
+        for (uint32_t j = 0; j < num_views; j++)
         {
-            glGenFramebuffers(1, &(present[i].fbo[j]));
             glBindFramebuffer(GL_FRAMEBUFFER, present[i].fbo[j]);
             glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, present[i].render_image, 0, j);
 
@@ -108,7 +109,6 @@ int main()
 
     // Initialize OpenGL settings
     glDisable(GL_DEPTH_TEST);
-    uint32_t num_views = is_stereo ? 2 : 1;
     GLenum draw_buffer_index[2] = { GL_BACK_LEFT, GL_BACK_RIGHT };
     if (!is_stereo) draw_buffer_index[0] = GL_BACK;
 
@@ -166,8 +166,6 @@ GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* widt
         return nullptr;
     }
 
-    // Prevent GLFW from implicitly creating an OpenGL context
-    //glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API
     // Set OpenGL context to 4.6 core
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
