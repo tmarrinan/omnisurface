@@ -183,14 +183,25 @@ GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* widt
     }
 
     // Get resolution of primary monitor
+    int x_offset, y_offset;
+    glfwGetMonitorPos(monitors[monitor_idx], &x_offset, &y_offset);
     const GLFWvidmode* mode = glfwGetVideoMode(monitors[monitor_idx]);
     *width = mode->width;
     *height = mode->height;
 
     // Create fullscreen window
-    GLFWwindow* window = glfwCreateWindow(mode->width, mode->height, title, monitors[monitor_idx], nullptr);
-    if (!window)
+    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    GLFWwindow* window = glfwCreateWindow(mode->width, mode->height, title, nullptr, nullptr);
+    if (window)
     {
+        glfwSetWindowPos(window, x_offset, y_offset);
+        glfwShowWindow(window);
+    }
+    else
+    {
+        glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+        glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
         glfwWindowHint(GLFW_STEREO, GLFW_FALSE);
         *width = 0.8 * static_cast<double>(mode->width);
         *height = 0.8 * static_cast<double>(mode->height);
