@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 
 #if defined(_WIN32)
+#define NOMINMAX
 #include <windows.h>
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;       // Forces NVIDIA Performance GPU
@@ -35,18 +36,26 @@ struct PresentData {
     GLuint fbo[2];
 };
 
+struct InteractionState {
+    bool mouse_button_down[2];
+    double cursor_pos[2];
+    double cursor_delta[2];
+};
+
 // Function definitions
 GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* width, int* height, bool* is_stereo);
 void importExternalTextureArray(vk360::ExternalImageInfo& ext_img_info, GLuint* texture);
 void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore);
+void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
+void mouseMoveCallback(GLFWwindow* window, double xpos, double ypos);
 
 // Main program
 int main()
 {
     // Read in display configuration
     vk360::DisplayConfig *config = new vk360::DisplayConfig();
-    if (!config->loadFromFile("resrc/config_plane.txt"))
-    //if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
+    //if (!config->loadFromFile("resrc/config_3plane.txt"))
+    if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
     {
         fprintf(stderr, "OmniSurface> Error: Failed to read config file\n");
         return EXIT_FAILURE;
@@ -65,6 +74,16 @@ int main()
     printf("OmniSurface> Info: Launching %s window on monitor %d with resolution %dx%d\n",
         is_stereo ? "Stereo 3D" : "Standard 2D", config->getMonitor(), window_w, window_h);
 
+    // Register mouse event callbacks
+    InteractionState interaction{};
+    interaction.mouse_button_down[0] = false;
+    interaction.mouse_button_down[1] = false;
+    interaction.cursor_pos[0] = 0.0;
+    interaction.cursor_pos[1] = 0.0;
+    glfwSetWindowUserPointer(window, &interaction);
+    glfwSetMouseButtonCallback(window, mouseButtonCallback);
+    glfwSetCursorPosCallback(window, mouseMoveCallback);
+
     // Query the GPU name and UUID from the active OpenGL context
     const GLubyte* renderer = glGetString(GL_RENDERER);
     GLubyte gl_device_uuid[GL_UUID_SIZE_EXT];
@@ -78,7 +97,7 @@ int main()
 
     // Setup Vulkan 360 renderer
     vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, is_stereo, config);
-    //vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, true);
+    //vk360::Vulkan360* app = new vk360::Vulkan360(gl_device_uuid, window_w, window_h, true, config);
 
     // Import external data to OpenGL for framebuffer presentation
     PresentData present[2];
@@ -122,7 +141,10 @@ int main()
     // Main render loop
     GLuint buffers[1];
     GLenum layouts[1] = { GL_LAYOUT_GENERAL_EXT };
-    float rotation[2] = { -22.5 * (M_PI / 180.0), 22.5 * (M_PI / 180.0)};
+    // TODO: make rotation controlled interactively
+    //  - X [-180, 180] --> rollover (X < -180.0 ? add 360.0; X > 180.0 ? subtract 360.0)
+    //  - Y [-45, 45] --> clamp
+    float rotation[2] = { 0.0, 0.0 };
     while (!glfwWindowShouldClose(window))
     {
         // Poll for user events
@@ -133,6 +155,21 @@ int main()
         {
             glfwSetWindowShouldClose(window, true);
         }
+
+        // Update rotation
+        if (interaction.mouse_button_down[0])
+        {
+            float delta_theta = -interaction.cursor_delta[0] / 1000.0;
+            float delta_phi = interaction.cursor_delta[1] / 1000.0;
+
+            float new_theta = std::fmod(rotation[0] + delta_theta + M_PI, 2.0 * M_PI);
+            if (new_theta < 0.0) new_theta += 2.0 * M_PI;
+            rotation[0] = new_theta - M_PI;
+
+            rotation[1] = std::min(std::max(rotation[1] + delta_phi, static_cast<float>(-0.5 * M_PI)), static_cast<float>(0.5 * M_PI));
+        }
+        interaction.cursor_delta[0] = 0.0;
+        interaction.cursor_delta[1] = 0.0;
 
         // Trigger render (Vulkan)
         //uint32_t buffer_idx = app->drawTestScreen();
@@ -264,4 +301,37 @@ void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore)
 #elif defined(__linux__)
     glImportSemaphoreFdEXT(*semaphore, GL_HANDLE_TYPE_OPAQUE_FD_EXT, sem_handle);
 #endif
+}
+
+void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
+{
+    InteractionState* state = static_cast<InteractionState*>(glfwGetWindowUserPointer(window));
+    if (state == nullptr) return;
+
+    if (button == GLFW_MOUSE_BUTTON_LEFT)
+    {
+        if (action == GLFW_PRESS) state->mouse_button_down[0] = true;
+        else if (action == GLFW_RELEASE) state->mouse_button_down[0] = false;
+        
+    }
+    else if (button == GLFW_MOUSE_BUTTON_RIGHT)
+    {
+        if (action == GLFW_PRESS) state->mouse_button_down[1] = true;
+        else if (action == GLFW_RELEASE) state->mouse_button_down[1] = false;
+
+    }
+    glfwGetCursorPos(window, &(state->cursor_pos[0]), &(state->cursor_pos[1]));
+    state->cursor_delta[0] = 0.0;
+    state->cursor_delta[1] = 0.0;
+}
+
+void mouseMoveCallback(GLFWwindow* window, double xpos, double ypos)
+{
+    InteractionState* state = static_cast<InteractionState*>(glfwGetWindowUserPointer(window));
+    if (state == nullptr) return;
+
+    state->cursor_delta[0] = xpos - state->cursor_pos[0];
+    state->cursor_delta[1] = ypos - state->cursor_pos[1];
+    state->cursor_pos[0] = xpos;
+    state->cursor_pos[1] = ypos;
 }
