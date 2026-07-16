@@ -16,6 +16,10 @@ extern "C" {
 
 #include "vk360.h"
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 
 // Data types
 #if defined(_WIN32)
@@ -41,7 +45,8 @@ int main()
 {
     // Read in display configuration
     vk360::DisplayConfig *config = new vk360::DisplayConfig();
-    if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
+    if (!config->loadFromFile("resrc/config_plane.txt"))
+    //if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
     {
         fprintf(stderr, "OmniSurface> Error: Failed to read config file\n");
         return EXIT_FAILURE;
@@ -117,6 +122,7 @@ int main()
     // Main render loop
     GLuint buffers[1];
     GLenum layouts[1] = { GL_LAYOUT_GENERAL_EXT };
+    float rotation[2] = { -22.5 * (M_PI / 180.0), 22.5 * (M_PI / 180.0)};
     while (!glfwWindowShouldClose(window))
     {
         // Poll for user events
@@ -130,7 +136,7 @@ int main()
 
         // Trigger render (Vulkan)
         //uint32_t buffer_idx = app->drawTestScreen();
-        uint32_t buffer_idx = app->drawMonoImage(0.0);
+        uint32_t buffer_idx = app->drawMonoImage(rotation);
 
         // Wait for Vulkan to signal render is complete
         buffers[0] = present[buffer_idx].render_image;

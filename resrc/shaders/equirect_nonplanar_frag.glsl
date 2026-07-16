@@ -40,6 +40,11 @@ layout(scalar, set = 0, binding = 1) uniform DisplayData {
     DisplaySurface surfaces[32];
 } display_data;
 
+// Push constants (updated each frame)
+layout(push_constant) uniform PushConstants {
+    vec2 rotation;
+    // TODO: add camera?
+} pcs;
 
 void main() {
     vec3 camera = vec3(0.0, 1.0, 0.0); // TODO: handle eye separation
@@ -75,8 +80,23 @@ void main() {
     
     // Calculate spherical direction of fragment
     vec3 frag_dir = normalize(frag_pos_world - camera);
-    float theta = mod(atan(-frag_dir.x, frag_dir.z) + TWO_PI, TWO_PI);
-    float phi = acos(frag_dir.y);
+    float cos_rx = cos(-pcs.rotation.x);
+    float sin_rx = sin(-pcs.rotation.x);
+    float cos_ry = cos(pcs.rotation.y);
+    float sin_ry = sin(pcs.rotation.y);
+    mat3 pitch = mat3(
+        1.0,     0.0,    0.0,
+        0.0,  cos_ry, sin_ry,
+        0.0, -sin_ry, cos_ry
+    );
+    mat3 yaw = mat3(
+        cos_rx, 0.0, -sin_rx,
+           0.0, 1.0,     0.0,
+        sin_rx, 0.0,  cos_rx
+    );
+    vec3 rotated_dir = yaw * (pitch * frag_dir);
+    float theta = mod(atan(-rotated_dir.x, rotated_dir.z) , TWO_PI);
+    float phi = acos(rotated_dir.y);
     
     // Convert spherical coords to normalized UV coords
     //  * offset Y-coordinate based on view layer (image is top/bottom stereo)

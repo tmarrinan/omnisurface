@@ -702,7 +702,7 @@ int vk360::Vulkan360::drawTestScreen()
     return render_buf_idx;
 }
 
-int vk360::Vulkan360::drawMonoImage(float rotation)
+int vk360::Vulkan360::drawMonoImage(float* rotation)
 {
     // Get back buffer - resources to render image into
     VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
@@ -745,11 +745,11 @@ int vk360::Vulkan360::drawMonoImage(float rotation)
 
     // Bind graphics pipeline
     vkCmdBindPipeline(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline);
-    //vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout, 0, 1, &_vk.desc, 0, nullptr);
 
     // Draw fullscreen quad
     vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout,
         0, 1, &_vk.desc, 0, nullptr);
+    vkCmdPushConstants(buf.cmd, _vk.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 2 * sizeof(float), rotation);
 
     vkCmdDraw(buf.cmd, 6, 1, 0, 0);
 
@@ -785,6 +785,20 @@ int vk360::Vulkan360::drawMonoImage(float rotation)
     {
         fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
     }
+
+    int render_buf_idx = _vk.render_buffer_index;
+    _vk.render_buffer_index = 1 - _vk.render_buffer_index; // toggle between 0 and 1
+
+    return render_buf_idx;
+}
+
+int vk360::Vulkan360::drawStereoImage(float* rotation)
+{
+    // Get back buffer - resources to render image into
+    VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
+
+    // ...
+
 
     int render_buf_idx = _vk.render_buffer_index;
     _vk.render_buffer_index = 1 - _vk.render_buffer_index; // toggle between 0 and 1
@@ -1371,12 +1385,17 @@ void vk360::Vulkan360::createUniformBufferObject(VkBuffer* ubo_ptr, VkDeviceMemo
 void vk360::Vulkan360::createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr)
 {
     // Create Pipeline Layout
+    VkPushConstantRange push_constant_range{};
+    push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    push_constant_range.offset = 0;
+    push_constant_range.size = 2 * sizeof(float);
+
     VkPipelineLayoutCreateInfo pipeline_layout_info{};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_layout_info.setLayoutCount = 1;
     pipeline_layout_info.pSetLayouts = &_vk.desc_layout;
-    pipeline_layout_info.pushConstantRangeCount = 0;
-    pipeline_layout_info.pPushConstantRanges = nullptr;
+    pipeline_layout_info.pushConstantRangeCount = 1;
+    pipeline_layout_info.pPushConstantRanges = &push_constant_range;
 
     if (vkCreatePipelineLayout(_vk.device, &pipeline_layout_info, nullptr, pipeline_layout_ptr) != VK_SUCCESS)
     {

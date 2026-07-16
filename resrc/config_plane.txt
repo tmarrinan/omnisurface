@@ -1,6 +1,10 @@
 OmniSurface Config
 Monitor: 0
-Base Shape: plane
-Facets: 1
-Radius: 0.5
-Height: 0.3349625
+Surface Count: 1, 1
+[
+  Base Shape: plane
+  Bottom Left: -2.24, 0.0, -1.0
+  Bottom Right: 2.24, 0.0, -1.0
+  Top Left: -2.24, 1.875, -1.0
+]
+Origin: 0.0, 0.0, 0.0

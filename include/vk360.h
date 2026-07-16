@@ -162,7 +162,7 @@ namespace vk360 {
 #endif
         void loadImage(const char* path, bool is_stereo);
         int drawTestScreen();
-        int drawMonoImage(float rotation);
-        int drawStereoImage(float rotation);
+        int drawMonoImage(float* rotation);
+        int drawStereoImage(float* rotation);
     };
 }
