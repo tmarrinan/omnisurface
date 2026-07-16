@@ -4,6 +4,7 @@
 
 
 struct DisplaySurface {
+    int base_shape;
     vec3 bottom_left;
     vec3 bottom_right;
     vec3 top_left;

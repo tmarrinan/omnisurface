@@ -9,6 +9,10 @@
 #include "stb_image.h"
 #include "vk360.h"
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 
 vk360::DisplayConfig::DisplayConfig() :
     _monitor_index{ 0 }
@@ -52,7 +56,16 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
         }
         else if (line.length() >= 16 && line.substr(0, 15) == "Surface Count: ")
         {
-            _surfaces.resize(std::stoull(line.substr(15)));
+            size_t comma = line.find(',');
+            if (comma == std::string::npos)
+            {
+                fprintf(stderr, "OmniSurface> Error: config file format not recognized - surface count expects 2 comma separated numbers\n");
+                return false;
+            }
+            _display_grid[0] = std::stoul(line.substr(15, comma));
+            _display_grid[1] = std::stoul(line.substr(comma + 1));
+
+            _surfaces.resize(_display_grid[0] * _display_grid[1]);
         }
         else if (line.length() >= 1 && line.substr(0, 1) == "[")
         {
@@ -61,8 +74,6 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                 fprintf(stderr, "DisplayConfig> Error: config file  read error - found more surfaces than declared count\n");
                 return false;
             }
-            DisplayPlaneSurface* surf_plane = nullptr;
-            DisplayCylinderSurface* surf_cylinder = nullptr;
             while (std::getline(config_file, line) && (line.length() < 1 || line.substr(0, 1) != "]"))
             {
                 size_t data_pos = line.find_first_not_of(" ");
@@ -75,15 +86,13 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                     std::string shape = line.substr(12);
                     if (shape == "plane")
                     {
-                        surf_plane = new DisplayPlaneSurface();
-                        surf_plane->base_shape = DisplayBaseShape::BASE_SHAPE_PLANE;
-                        _surfaces[surface_idx] = surf_plane;
+                        _surfaces[surface_idx] = new GLSLDisplaySurface();
+                        _surfaces[surface_idx]->base_shape = 0;
                     }
                     else if (shape == "cylinder")
                     {
-                        surf_cylinder = new DisplayCylinderSurface();
-                        surf_cylinder->base_shape = DisplayBaseShape::BASE_SHAPE_CYLINDER;
-                        _surfaces[surface_idx] = surf_cylinder;
+                        _surfaces[surface_idx] = new GLSLDisplaySurface();
+                        _surfaces[surface_idx]->base_shape = 1;
                     }
                     else
                     {
@@ -91,59 +100,64 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                         return false;
                     }
                 }
-                else if (line.length() >= 8 && line.substr(0, 7) == "Width: " && surf_plane != nullptr)
-                {
-                    surf_plane->size[0] = std::stod(line.substr(7));
-                }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Height: " && surf_plane != nullptr)
-                {
-                    surf_plane->size[1] = std::stod(line.substr(8));
-                }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Center: " && surf_plane != nullptr)
+                else if (line.length() >= 14 && line.substr(0, 13) == "Bottom Left: " && _surfaces[surface_idx]->base_shape == 0)
                 {
                     size_t comma1 = line.find(',');
                     size_t comma2 = line.find(',', comma1 + 1);
                     if (comma1 == std::string::npos || comma2 == std::string::npos)
                     {
-                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - Center expexts 3 comma separated numbers\n");
+                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
                         return false;
                     }
-                    surf_plane->center[0] = std::stod(line.substr(8, comma1));
-                    surf_plane->center[1] = std::stod(line.substr(comma1 + 1, comma2 - comma1 - 1));
-                    surf_plane->center[2] = std::stod(line.substr(comma2 + 1));
+                    _surfaces[surface_idx]->d1[0] = std::stof(line.substr(13, comma1));
+                    _surfaces[surface_idx]->d1[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
+                    _surfaces[surface_idx]->d1[2] = std::stof(line.substr(comma2 + 1));
                 }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Normal: " && surf_plane != nullptr)
+                else if (line.length() >= 15 && line.substr(0, 14) == "Bottom Right: " && _surfaces[surface_idx]->base_shape == 0)
                 {
                     size_t comma1 = line.find(',');
                     size_t comma2 = line.find(',', comma1 + 1);
                     if (comma1 == std::string::npos || comma2 == std::string::npos)
                     {
-                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - Normal expexts 3 comma separated numbers\n");
+                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
                         return false;
                     }
-                    surf_plane->normal[0] = std::stod(line.substr(8, comma1));
-                    surf_plane->normal[1] = std::stod(line.substr(comma1 + 1, comma2 - comma1 - 1));
-                    surf_plane->normal[2] = std::stod(line.substr(comma2 + 1));
+                    _surfaces[surface_idx]->d2[0] = std::stof(line.substr(14, comma1));
+                    _surfaces[surface_idx]->d2[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
+                    _surfaces[surface_idx]->d2[2] = std::stof(line.substr(comma2 + 1));
                 }
-                else if (line.length() >= 9 && line.substr(0, 8) == "Radius: " && surf_cylinder != nullptr)
+                else if (line.length() >= 11 && line.substr(0, 10) == "Top Left: " && _surfaces[surface_idx]->base_shape == 0)
                 {
-                    surf_cylinder->radius = std::stod(line.substr(8));
+                    size_t comma1 = line.find(',');
+                    size_t comma2 = line.find(',', comma1 + 1);
+                    if (comma1 == std::string::npos || comma2 == std::string::npos)
+                    {
+                        fprintf(stderr, "OmniSurface> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
+                        return false;
+                    }
+                    _surfaces[surface_idx]->d3[0] = std::stof(line.substr(10, comma1));
+                    _surfaces[surface_idx]->d3[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
+                    _surfaces[surface_idx]->d3[2] = std::stof(line.substr(comma2 + 1));
                 }
-                else if (line.length() >= 16 && line.substr(0, 15) == "Bottom Height: " && surf_cylinder != nullptr)
+                else if (line.length() >= 9 && line.substr(0, 8) == "Radius: " && _surfaces[surface_idx]->base_shape == 1)
                 {
-                    surf_cylinder->altitude[0] = std::stod(line.substr(15));
+                    _surfaces[surface_idx]->d1[0] = std::stof(line.substr(8));
                 }
-                else if (line.length() >= 13 && line.substr(0, 12) == "Top Height: " && surf_cylinder != nullptr)
+                else if (line.length() >= 16 && line.substr(0, 15) == "Bottom Height: " && _surfaces[surface_idx]->base_shape == 1)
                 {
-                    surf_cylinder->altitude[1] = std::stod(line.substr(12));
+                    _surfaces[surface_idx]->d2[0] = std::stof(line.substr(15));
                 }
-                else if (line.length() >= 13 && line.substr(0, 12) == "Left Angle: " && surf_cylinder != nullptr)
+                else if (line.length() >= 13 && line.substr(0, 12) == "Top Height: " && _surfaces[surface_idx]->base_shape == 1)
                 {
-                    surf_cylinder->sector[0] = std::stod(line.substr(12));
+                    _surfaces[surface_idx]->d2[1] = std::stof(line.substr(12));
                 }
-                else if (line.length() >= 14 && line.substr(0, 13) == "Right Angle: " && surf_cylinder != nullptr)
+                else if (line.length() >= 13 && line.substr(0, 12) == "Left Angle: " && _surfaces[surface_idx]->base_shape == 1)
                 {
-                    surf_cylinder->sector[1] = std::stod(line.substr(13));
+                    _surfaces[surface_idx]->d3[0] = std::stof(line.substr(12)) * (M_PI / 180.0);
+                }
+                else if (line.length() >= 14 && line.substr(0, 13) == "Right Angle: " && _surfaces[surface_idx]->base_shape == 1)
+                {
+                    _surfaces[surface_idx]->d3[1] = std::stof(line.substr(13)) * (M_PI / 180.0);
                 }
             }
             surface_idx++;
@@ -154,12 +168,12 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
             size_t comma2 = line.find(',', comma1 + 1);
             if (comma1 == std::string::npos || comma2 == std::string::npos)
             {
-                fprintf(stderr, "DisplayConfig> Error: config file format not recognized - Normal expexts 3 comma separated numbers\n");
+                fprintf(stderr, "DisplayConfig> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
                 return false;
             }
-            _origin[0] = std::stod(line.substr(8, comma1));
-            _origin[1] = std::stod(line.substr(comma1 + 1, comma2 - comma1 - 1));
-            _origin[2] = std::stod(line.substr(comma2 + 1));
+            _origin[0] = std::stof(line.substr(8, comma1));
+            _origin[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
+            _origin[2] = std::stof(line.substr(comma2 + 1));
         }
 
         line0 = false;
@@ -174,12 +188,22 @@ int vk360::DisplayConfig::getMonitor()
     return _monitor_index;
 }
 
+uint32_t vk360::DisplayConfig::getNumberOfDisplayColumns()
+{
+    return _display_grid[0];
+}
+
+uint32_t vk360::DisplayConfig::getNumberOfDisplayRows()
+{
+    return _display_grid[1];
+}
+
 uint32_t vk360::DisplayConfig::getSurfaceCount()
 {
     return static_cast<uint32_t>(_surfaces.size());
 }
 
-void vk360::DisplayConfig::getSurface(uint32_t index, vk360::DisplaySurface** surf_ptr)
+void vk360::DisplayConfig::getSurface(uint32_t index, vk360::GLSLDisplaySurface** surf_ptr)
 {
     if (index >= _surfaces.size())
     {
@@ -191,7 +215,7 @@ void vk360::DisplayConfig::getSurface(uint32_t index, vk360::DisplaySurface** su
     }
 }
 
-void vk360::DisplayConfig::getOrigin(double* origin)
+void vk360::DisplayConfig::getOrigin(float* origin)
 {
     origin[0] = _origin[0];
     origin[1] = _origin[1];
@@ -203,26 +227,28 @@ void vk360::DisplayConfig::printConfig()
     // TODO: maybe store 4 corners of planar surface instead of center and normal and size
     printf("********* OmniSurface Config *********\n");
     printf("Monitor: %u\n", _monitor_index);
+    printf("Display Grid: %ux%u\n", _display_grid[0], _display_grid[1]);
     printf("Origin: (%.4f, %.4f, %.4f)\n", _origin[0], _origin[1], _origin[2]);
     printf("Display Surfaces:\n");
     for (uint32_t i = 0; i < _surfaces.size(); i++)
     {
-        if (_surfaces[i] == nullptr) printf("WARNING: surface is NULL\n");
-        else if (_surfaces[i]->base_shape == vk360::DisplayBaseShape::BASE_SHAPE_PLANE)
+        if (_surfaces[i] == nullptr)
         {
-            DisplayPlaneSurface* surf = reinterpret_cast<DisplayPlaneSurface*>(_surfaces[i]);
-            printf("  Planar\n");
-            printf("    size: %.4f x %.4f\n", surf->size[0], surf->size[1]);
-            printf("    center: (%.4f, %.4f, %.4f)\n", surf->center[0], surf->center[1], surf->center[2]);
-            printf("    normal: (%.4f, %.4f, %.4f)\n", surf->normal[0], surf->normal[1], surf->normal[2]);
+            printf("WARNING: surface is NULL\n");
         }
-        else if (_surfaces[i]->base_shape == vk360::DisplayBaseShape::BASE_SHAPE_CYLINDER)
+        else if (_surfaces[i]->base_shape == 0)
         {
-            DisplayCylinderSurface* surf = reinterpret_cast<DisplayCylinderSurface*>(_surfaces[i]);
+            printf("  Planar\n");
+            printf("    bottom left:  (%.4f, %.4f, %.4f)\n", _surfaces[i]->d1[0], _surfaces[i]->d1[1], _surfaces[i]->d1[2]);
+            printf("    bottom right: (%.4f, %.4f, %.4f)\n", _surfaces[i]->d2[0], _surfaces[i]->d2[1], _surfaces[i]->d2[2]);
+            printf("    top left:     (%.4f, %.4f, %.4f)\n", _surfaces[i]->d3[0], _surfaces[i]->d3[1], _surfaces[i]->d3[2]);
+        }
+        else if (_surfaces[i]->base_shape == 1)
+        {
             printf("  Cylindrical\n");
-            printf("    radius: %.4f\n", surf->radius);
-            printf("    sector: %.4f - %.4f\n", surf->sector[0], surf->sector[1]);
-            printf("    altitude: %.4f - %.4f\n", surf->altitude[0], surf->altitude[1]);
+            printf("    radius:   %.4f\n", _surfaces[i]->d1[0]);
+            printf("    altitude: %.4f - %.4f\n", _surfaces[i]->d2[0], _surfaces[i]->d2[1]);
+            printf("    sector:   %.4f - %.4f\n", _surfaces[i]->d3[0] * (180.0 / M_PI), _surfaces[i]->d3[1] * (180.0 / M_PI));
         }
     }
     printf("**************************************\n");
@@ -243,8 +269,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 }
 
 
-vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo) :
-    _is_stereo{ is_stereo }
+vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo, DisplayConfig* config) :
+    _is_stereo{ is_stereo }, _config{ config }
 {
     _vk.extent.width = width;
     _vk.extent.height = height;
@@ -1318,38 +1344,17 @@ void vk360::Vulkan360::createUniformBufferObject(VkBuffer* ubo_ptr, VkDeviceMemo
     vkAllocateMemory(_vk.device, &buffer_alloc_info, nullptr, ubo_memory_ptr);
     vkBindBufferMemory(_vk.device, *ubo_ptr, *ubo_memory_ptr, 0);
 
-    // TODO: populate _vk.display_data_ubo based on config file data
-    _vk.display_data_ubo.grid_dims[0] = 3;
-    _vk.display_data_ubo.grid_dims[1] = 1;
+    // Populate UBO based on config file data
+    _vk.display_data_ubo.grid_dims[0] = _config->getNumberOfDisplayColumns();
+    _vk.display_data_ubo.grid_dims[1] = _config->getNumberOfDisplayRows();
     _vk.display_data_ubo.resolution[0] = static_cast<float>(_vk.extent.width);
     _vk.display_data_ubo.resolution[1] = static_cast<float>(_vk.extent.height);
-    _vk.display_data_ubo.surfaces[0].bottom_left[0] = -0.5f;
-    _vk.display_data_ubo.surfaces[0].bottom_left[1] =  0.0f;
-    _vk.display_data_ubo.surfaces[0].bottom_left[2] =  0.0f;
-    _vk.display_data_ubo.surfaces[0].bottom_right[0] = -0.5f;
-    _vk.display_data_ubo.surfaces[0].bottom_right[1] =  0.0f;
-    _vk.display_data_ubo.surfaces[0].bottom_right[2] = -1.0f;
-    _vk.display_data_ubo.surfaces[0].top_left[0] = -0.5f;
-    _vk.display_data_ubo.surfaces[0].top_left[1] =  1.875f;
-    _vk.display_data_ubo.surfaces[0].top_left[2] =  0.0f;
-    _vk.display_data_ubo.surfaces[1].bottom_left[0] = -0.5f;
-    _vk.display_data_ubo.surfaces[1].bottom_left[1] =  0.0f;
-    _vk.display_data_ubo.surfaces[1].bottom_left[2] = -1.0f;
-    _vk.display_data_ubo.surfaces[1].bottom_right[0] =  0.5f;
-    _vk.display_data_ubo.surfaces[1].bottom_right[1] =  0.0f;
-    _vk.display_data_ubo.surfaces[1].bottom_right[2] = -1.0f;
-    _vk.display_data_ubo.surfaces[1].top_left[0] = -0.5f;
-    _vk.display_data_ubo.surfaces[1].top_left[1] =  1.875f;
-    _vk.display_data_ubo.surfaces[1].top_left[2] = -1.0f;
-    _vk.display_data_ubo.surfaces[2].bottom_left[0] =  0.5f;
-    _vk.display_data_ubo.surfaces[2].bottom_left[1] =  0.0f;
-    _vk.display_data_ubo.surfaces[2].bottom_left[2] = -1.0f;
-    _vk.display_data_ubo.surfaces[2].bottom_right[0] = 0.5f;
-    _vk.display_data_ubo.surfaces[2].bottom_right[1] = 0.0f;
-    _vk.display_data_ubo.surfaces[2].bottom_right[2] = 0.0f;
-    _vk.display_data_ubo.surfaces[2].top_left[0] =  0.5f;
-    _vk.display_data_ubo.surfaces[2].top_left[1] =  1.875f;
-    _vk.display_data_ubo.surfaces[2].top_left[2] = -1.0f;
+    GLSLDisplaySurface* surf_ptr;
+    for (uint32_t i = 0; i < _config->getSurfaceCount(); i++)
+    {
+        _config->getSurface(i, &surf_ptr);
+        memcpy(&(_vk.display_data_ubo.surfaces[i]), surf_ptr, sizeof(GLSLDisplaySurface));
+    }
 
     void* mapped_data;
     vkMapMemory(_vk.device, *ubo_memory_ptr, 0, sizeof(GLSLDisplayData), 0, &mapped_data);

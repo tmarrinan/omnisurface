@@ -14,38 +14,37 @@
 
 
 namespace vk360 {
-    enum DisplayBaseShape : uint8_t { BASE_SHAPE_UNKNOWN, BASE_SHAPE_PLANE, BASE_SHAPE_CYLINDER };
-
-    struct DisplaySurface {
-        DisplayBaseShape base_shape;
+    struct GLSLDisplaySurface {
+        int base_shape; // PLANE = 0, CYLINDER = 1, UNKNOWN = INT_MAX
+        float d1[3];    // PLANE = bottom left corner, CYLINDER = radius
+        float d2[3];    // PLANE = bottom right corner, CYLINDER = altitude
+        float d3[3];    // PLANE = top left corner, CYLINDER = sector
     };
-
-    struct DisplayPlaneSurface : DisplaySurface {
-        double size[2];
-        double center[3];
-        double normal[3];
-    };
-
-    struct DisplayCylinderSurface : DisplaySurface {
-        double radius;
-        double altitude[2];
-        double sector[2];
+    struct GLSLDisplayData {
+        // virtual desktop screen layout
+        int grid_dims[2];
+        float resolution[2];
+        // physical display surface layout
+        GLSLDisplaySurface surfaces[32];
     };
 
     class DisplayConfig {
     private:
         int _monitor_index;
-        std::vector<DisplaySurface*> _surfaces;
-        double _origin[3];
+        uint32_t _display_grid[2];
+        std::vector<GLSLDisplaySurface*> _surfaces;
+        float _origin[3];
     public:
         DisplayConfig();
         ~DisplayConfig();
 
         bool loadFromFile(const char* config_filename);
         int getMonitor();
+        uint32_t getNumberOfDisplayColumns();
+        uint32_t getNumberOfDisplayRows();
         uint32_t getSurfaceCount();
-        void getSurface(uint32_t index, DisplaySurface** surf_ptr);
-        void getOrigin(double* origin);
+        void getSurface(uint32_t index, GLSLDisplaySurface** surf_ptr);
+        void getOrigin(float* origin);
         void printConfig();
     };
 
@@ -97,18 +96,6 @@ namespace vk360 {
 
     class Vulkan360 {
     private:
-        struct GLSLDisplaySurface {
-            float bottom_left[3];
-            float bottom_right[3];
-            float top_left[3];
-        };
-        struct GLSLDisplayData {
-            // virtual desktop screen layout
-            int grid_dims[2];
-            float resolution[2];
-            // physical display surface layout
-            GLSLDisplaySurface surfaces[32];
-        };
         struct VulkanRenderBuffer {
             VkCommandBuffer cmd;
             VulkanInteropSemaphore sem_vk_available;
@@ -136,11 +123,12 @@ namespace vk360 {
             VkDescriptorSet desc;
             VkBuffer ubo_buffer;
             VkDeviceMemory ubo_memory;
-            GLSLDisplayData display_data_ubo;
+            vk360::GLSLDisplayData display_data_ubo;
         };
 
         VulkanData _vk;
         bool _is_stereo;
+        DisplayConfig* _config;
 
         void createVulkanInstance(VkInstance* instance_ptr);
         void findPhysicalDevice(uint8_t* device_uuid, VkPhysicalDevice* physical_device_ptr, int* q_fam_idx_ptr);
@@ -161,7 +149,7 @@ namespace vk360 {
         void loadShaderModule(const char* path, VkShaderModule* shader_ptr);
 
     public:
-        Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo);
+        Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo, DisplayConfig* config);
         ~Vulkan360();
 
         void getExternalRenderBufferInfo(uint32_t index, ExternalImageInfo* ext_img);
