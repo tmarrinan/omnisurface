@@ -65,7 +65,13 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
             _display_grid[0] = std::stoul(line.substr(15, comma));
             _display_grid[1] = std::stoul(line.substr(comma + 1));
 
-            _surfaces.resize(_display_grid[0] * _display_grid[1]);
+            size_t surface_count = _display_grid[0] * _display_grid[1];
+            if (surface_count > 32)
+            {
+                fprintf(stderr, "OmniSurface> Error: detected %zu display surfaces (exceeds max of 32)\n", surface_count);
+                return false;
+            }
+            _surfaces.resize(surface_count);
         }
         else if (line.length() >= 1 && line.substr(0, 1) == "[")
         {
