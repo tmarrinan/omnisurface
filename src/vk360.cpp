@@ -254,7 +254,8 @@ vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t heigh
     createVulkanDeviceAndQueue(&_vk.device, &_vk.queue);
     createCommandPool(&_vk.pool);
     createRenderPass(fbo_color_format, &_vk.render_pass);
-    createDescriptorSetLayoutAndPool(&_vk.desc_layout, &_vk.desc_pool);
+    createDescriptorSet(&_vk.desc_layout, &_vk.desc_pool, &_vk.desc);
+    createUniformBufferObject(&_vk.ubo_buffer, &_vk.ubo_memory);
     for (uint32_t i = 0; i < 2; i++)
     {
         VulkanRenderBuffer& buf = _vk.render_buffer[i];
@@ -317,7 +318,6 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
     {
         vkDeviceWaitIdle(_vk.device);
 
-        vkFreeDescriptorSets(_vk.device, _vk.desc_pool, 1, &_vk.media360.desc);
         vkDestroySampler(_vk.device, _vk.media360.sampler, nullptr);
         vkDestroyImageView(_vk.device, _vk.media360.view, nullptr);
         vkDestroyImage(_vk.device, _vk.media360.image, nullptr);
@@ -529,34 +529,33 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
         return;
     }
 
-    // Create descriptor set
-    VkDescriptorSetAllocateInfo desc_alloc_info{};
-    desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc_info.descriptorPool = _vk.desc_pool;
-    desc_alloc_info.descriptorSetCount = 1;
-    desc_alloc_info.pSetLayouts = &_vk.desc_layout;
-
-    if (vkAllocateDescriptorSets(_vk.device, &desc_alloc_info, &_vk.media360.desc) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to allocate descriptor set\n");
-        return;
-    }
-
     VkDescriptorImageInfo desc_image_info{};
     desc_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     desc_image_info.imageView = _vk.media360.view;
     desc_image_info.sampler = _vk.media360.sampler;
 
-    VkWriteDescriptorSet desc_write{};
-    desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    desc_write.dstSet = _vk.media360.desc;
-    desc_write.dstBinding = 0; // layout(binding = 0)
-    desc_write.dstArrayElement = 0;
-    desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    desc_write.descriptorCount = 1;
-    desc_write.pImageInfo = &desc_image_info;
+    VkDescriptorBufferInfo desc_buffer_info{};
+    desc_buffer_info.buffer = _vk.ubo_buffer;
+    desc_buffer_info.offset = 0;
+    desc_buffer_info.range = sizeof(GLSLDisplayData);
 
-    vkUpdateDescriptorSets(_vk.device, 1, &desc_write, 0, nullptr);
+    VkWriteDescriptorSet desc_writes[2]{};
+    desc_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    desc_writes[0].dstSet = _vk.desc;
+    desc_writes[0].dstBinding = 0; // layout(binding = 0)
+    desc_writes[0].dstArrayElement = 0;
+    desc_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    desc_writes[0].descriptorCount = 1;
+    desc_writes[0].pImageInfo = &desc_image_info;
+    desc_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    desc_writes[1].dstSet = _vk.desc;
+    desc_writes[1].dstBinding = 1; // layout(binding = 1)
+    desc_writes[1].dstArrayElement = 0;
+    desc_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    desc_writes[1].descriptorCount = 1;
+    desc_writes[1].pBufferInfo = &desc_buffer_info;
+
+    vkUpdateDescriptorSets(_vk.device, 2, desc_writes, 0, nullptr);
 
     _vk.media360.stereo = is_stereo;
 }
@@ -714,11 +713,11 @@ int vk360::Vulkan360::drawMonoImage(float rotation)
 
     // Bind graphics pipeline
     vkCmdBindPipeline(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline);
-    vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout, 0, 1, &_vk.media360.desc, 0, nullptr);
+    //vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout, 0, 1, &_vk.desc, 0, nullptr);
 
     // Draw fullscreen quad
     vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout,
-        0, 1, &_vk.media360.desc, 0, nullptr);
+        0, 1, &_vk.desc, 0, nullptr);
 
     vkCmdDraw(buf.cmd, 6, 1, 0, 0);
 
@@ -880,14 +879,28 @@ void vk360::Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue*
     multiview_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
     multiview_features.pNext = nullptr;
 
+    VkPhysicalDeviceVulkan12Features vulkan12_features{};
+    vulkan12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vulkan12_features.uniformBufferStandardLayout = VK_TRUE;
+    vulkan12_features.scalarBlockLayout = VK_TRUE;
+    vulkan12_features.pNext = &multiview_features;
+
     VkPhysicalDeviceFeatures2 device_features2{};
     device_features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    device_features2.pNext = &multiview_features;
+    device_features2.pNext = &vulkan12_features;
 
     vkGetPhysicalDeviceFeatures2(_vk.physical_device, &device_features2);
     if (multiview_features.multiview == VK_FALSE)
     {
         fprintf(stderr, "Vulkan360> Error: Vulkan multiview not supported\n");
+        *device_ptr = VK_NULL_HANDLE;
+        *queue_ptr = VK_NULL_HANDLE;
+        return;
+    }
+
+    if (vulkan12_features.uniformBufferStandardLayout == VK_FALSE || vulkan12_features.scalarBlockLayout == VK_FALSE)
+    {
+        fprintf(stderr, "Vulkan360> Error: Vulkan uniform std430/scalar layout not supported\n");
         *device_ptr = VK_NULL_HANDLE;
         *queue_ptr = VK_NULL_HANDLE;
         return;
@@ -917,7 +930,7 @@ void vk360::Vulkan360::createVulkanDeviceAndQueue(VkDevice* device_ptr, VkQueue*
     device_create_info.pQueueCreateInfos = &queue_create_info;
     device_create_info.enabledExtensionCount = device_extensions.size();
     device_create_info.ppEnabledExtensionNames = device_extensions.data();
-    device_create_info.pNext = &multiview_features;
+    device_create_info.pNext = &vulkan12_features;
     if (vkCreateDevice(_vk.physical_device, &device_create_info, nullptr, device_ptr) != VK_SUCCESS)
     {
         fprintf(stderr, "Vulkan360> Error: could not create `vkDevice`\n");
@@ -1210,8 +1223,9 @@ void vk360::Vulkan360::createRenderPass(VkFormat color_format, VkRenderPass* ren
     }
 }
 
-void vk360::Vulkan360::createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* desc_layout_ptr, VkDescriptorPool* desc_pool_ptr)
+void vk360::Vulkan360::createDescriptorSet(VkDescriptorSetLayout* desc_layout_ptr, VkDescriptorPool* desc_pool_ptr, VkDescriptorSet* desc_ptr)
 {
+    // Create descriptor set layout
     VkDescriptorSetLayoutBinding sampler_layout_binding{};
     sampler_layout_binding.binding = 0;
     sampler_layout_binding.descriptorCount = 1;
@@ -1219,10 +1233,19 @@ void vk360::Vulkan360::createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* d
     sampler_layout_binding.pImmutableSamplers = nullptr;
     sampler_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
+    VkDescriptorSetLayoutBinding ubo_layout_binding{};
+    ubo_layout_binding.binding = 1;
+    ubo_layout_binding.descriptorCount = 1;
+    ubo_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubo_layout_binding.pImmutableSamplers = nullptr;
+    ubo_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding bindings[] = { sampler_layout_binding, ubo_layout_binding };
+
     VkDescriptorSetLayoutCreateInfo layout_info{};
     layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_info.bindingCount = 1;
-    layout_info.pBindings = &sampler_layout_binding;
+    layout_info.bindingCount = 2;
+    layout_info.pBindings = bindings;
 
     if (vkCreateDescriptorSetLayout(_vk.device, &layout_info, nullptr, desc_layout_ptr) != VK_SUCCESS)
     {
@@ -1232,15 +1255,18 @@ void vk360::Vulkan360::createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* d
         return;
     }
 
-    VkDescriptorPoolSize pool_size{};
-    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = 2;
+    // Create descriptor set pool
+    VkDescriptorPoolSize pool_sizes[2]{};
+    pool_sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_sizes[0].descriptorCount = 2;
+    pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    pool_sizes[1].descriptorCount = 2;
 
     VkDescriptorPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes = &pool_size;
+    pool_info.poolSizeCount = 2;
+    pool_info.pPoolSizes = pool_sizes;
     pool_info.maxSets = 2;
 
     if (vkCreateDescriptorPool(_vk.device, &pool_info, nullptr, desc_pool_ptr) != VK_SUCCESS)
@@ -1250,6 +1276,85 @@ void vk360::Vulkan360::createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* d
         desc_pool_ptr = nullptr;
         return;
     }
+
+    // Create descriptor set
+    VkDescriptorSetAllocateInfo desc_alloc_info{};
+    desc_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    desc_alloc_info.descriptorPool = _vk.desc_pool;
+    desc_alloc_info.descriptorSetCount = 1;
+    desc_alloc_info.pSetLayouts = &_vk.desc_layout;
+
+    if (vkAllocateDescriptorSets(_vk.device, &desc_alloc_info, desc_ptr) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to allocate descriptor set\n");
+        return;
+    }
+}
+
+void vk360::Vulkan360::createUniformBufferObject(VkBuffer* ubo_ptr, VkDeviceMemory* ubo_memory_ptr)
+{
+    VkBufferCreateInfo buffer_info{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = sizeof(GLSLDisplayData);
+    buffer_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT; 
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(_vk.device, &buffer_info, nullptr, ubo_ptr) != VK_SUCCESS) {
+        fprintf(stderr, "Vulkan360> Error: Failed to create `VkBuffer`\n");
+        ubo_ptr = nullptr;
+        ubo_memory_ptr = nullptr;
+        return;
+    }
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(_vk.device, *ubo_ptr, &mem_reqs);
+
+    VkMemoryAllocateInfo buffer_alloc_info{};
+    buffer_alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    buffer_alloc_info.allocationSize = mem_reqs.size;
+    buffer_alloc_info.memoryTypeIndex = findMemoryType(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(_vk.device, &buffer_alloc_info, nullptr, ubo_memory_ptr);
+    vkBindBufferMemory(_vk.device, *ubo_ptr, *ubo_memory_ptr, 0);
+
+    // TODO: populate _vk.display_data_ubo based on config file data
+    _vk.display_data_ubo.grid_dims[0] = 3;
+    _vk.display_data_ubo.grid_dims[1] = 1;
+    _vk.display_data_ubo.resolution[0] = static_cast<float>(_vk.extent.width);
+    _vk.display_data_ubo.resolution[1] = static_cast<float>(_vk.extent.height);
+    _vk.display_data_ubo.surfaces[0].bottom_left[0] = -0.5f;
+    _vk.display_data_ubo.surfaces[0].bottom_left[1] =  0.0f;
+    _vk.display_data_ubo.surfaces[0].bottom_left[2] =  0.0f;
+    _vk.display_data_ubo.surfaces[0].bottom_right[0] = -0.5f;
+    _vk.display_data_ubo.surfaces[0].bottom_right[1] =  0.0f;
+    _vk.display_data_ubo.surfaces[0].bottom_right[2] = -1.0f;
+    _vk.display_data_ubo.surfaces[0].top_left[0] = -0.5f;
+    _vk.display_data_ubo.surfaces[0].top_left[1] =  1.875f;
+    _vk.display_data_ubo.surfaces[0].top_left[2] =  0.0f;
+    _vk.display_data_ubo.surfaces[1].bottom_left[0] = -0.5f;
+    _vk.display_data_ubo.surfaces[1].bottom_left[1] =  0.0f;
+    _vk.display_data_ubo.surfaces[1].bottom_left[2] = -1.0f;
+    _vk.display_data_ubo.surfaces[1].bottom_right[0] =  0.5f;
+    _vk.display_data_ubo.surfaces[1].bottom_right[1] =  0.0f;
+    _vk.display_data_ubo.surfaces[1].bottom_right[2] = -1.0f;
+    _vk.display_data_ubo.surfaces[1].top_left[0] = -0.5f;
+    _vk.display_data_ubo.surfaces[1].top_left[1] =  1.875f;
+    _vk.display_data_ubo.surfaces[1].top_left[2] = -1.0f;
+    _vk.display_data_ubo.surfaces[2].bottom_left[0] =  0.5f;
+    _vk.display_data_ubo.surfaces[2].bottom_left[1] =  0.0f;
+    _vk.display_data_ubo.surfaces[2].bottom_left[2] = -1.0f;
+    _vk.display_data_ubo.surfaces[2].bottom_right[0] = 0.5f;
+    _vk.display_data_ubo.surfaces[2].bottom_right[1] = 0.0f;
+    _vk.display_data_ubo.surfaces[2].bottom_right[2] = 0.0f;
+    _vk.display_data_ubo.surfaces[2].top_left[0] =  0.5f;
+    _vk.display_data_ubo.surfaces[2].top_left[1] =  1.875f;
+    _vk.display_data_ubo.surfaces[2].top_left[2] = -1.0f;
+
+    void* mapped_data;
+    vkMapMemory(_vk.device, *ubo_memory_ptr, 0, sizeof(GLSLDisplayData), 0, &mapped_data);
+    memcpy(mapped_data, &_vk.display_data_ubo, sizeof(GLSLDisplayData));
+    vkUnmapMemory(_vk.device, *ubo_memory_ptr);
 }
 
 void vk360::Vulkan360::createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr)

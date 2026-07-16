@@ -92,12 +92,23 @@ namespace vk360 {
         VkImageView view = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
-        VkDescriptorSet desc = VK_NULL_HANDLE;
         bool stereo = false;
     };
 
     class Vulkan360 {
     private:
+        struct GLSLDisplaySurface {
+            float bottom_left[3];
+            float bottom_right[3];
+            float top_left[3];
+        };
+        struct GLSLDisplayData {
+            // virtual desktop screen layout
+            int grid_dims[2];
+            float resolution[2];
+            // physical display surface layout
+            GLSLDisplaySurface surfaces[32];
+        };
         struct VulkanRenderBuffer {
             VkCommandBuffer cmd;
             VulkanInteropSemaphore sem_vk_available;
@@ -122,6 +133,10 @@ namespace vk360 {
             VkPipeline pipeline;
             VkPipelineLayout pipeline_layout;
             VulkanTexture media360;
+            VkDescriptorSet desc;
+            VkBuffer ubo_buffer;
+            VkDeviceMemory ubo_memory;
+            GLSLDisplayData display_data_ubo;
         };
 
         VulkanData _vk;
@@ -138,7 +153,8 @@ namespace vk360 {
         void createExternalImage(uint32_t width, uint32_t height, uint32_t layers, VkFormat format, VulkanInteropImage* ext_img);
         void createFramebuffer(VulkanImageData& image, VkFramebuffer* framebuffer_ptr);
         void createRenderPass(VkFormat color_format, VkRenderPass* render_pass_ptr);
-        void createDescriptorSetLayoutAndPool(VkDescriptorSetLayout* desc_layout_ptr, VkDescriptorPool* desc_pool_ptr);
+        void createDescriptorSet(VkDescriptorSetLayout* desc_layout_ptr, VkDescriptorPool* desc_pool_ptr, VkDescriptorSet* desc_ptr);
+        void createUniformBufferObject(VkBuffer* ubo_ptr, VkDeviceMemory* ubo_memory_ptr);
         void createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipelineLayout* pipeline_layout_ptr);
         int findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
         void transitionImageLayoutToGeneral(VkImage image, VkFormat format, uint32_t layers);
