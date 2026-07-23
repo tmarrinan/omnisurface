@@ -54,8 +54,8 @@ int main()
 {
     // Read in display configuration
     vk360::DisplayConfig *config = new vk360::DisplayConfig();
-    //if (!config->loadFromFile("resrc/config_3plane.txt"))
-    if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
+    if (!config->loadFromFile("resrc/config_3plane.txt"))
+    //if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
     {
         fprintf(stderr, "OmniSurface> Error: Failed to read config file\n");
         return EXIT_FAILURE;
@@ -170,10 +170,10 @@ int main()
         }
         interaction.cursor_delta[0] = 0.0;
         interaction.cursor_delta[1] = 0.0;
+        app->setViewRotation(rotation[0], rotation[1]);
 
         // Trigger render (Vulkan)
-        //uint32_t buffer_idx = app->drawTestScreen();
-        uint32_t buffer_idx = app->drawMonoImage(rotation);
+        uint32_t buffer_idx = app->drawFrame();
 
         // Wait for Vulkan to signal render is complete
         buffers[0] = present[buffer_idx].render_image;

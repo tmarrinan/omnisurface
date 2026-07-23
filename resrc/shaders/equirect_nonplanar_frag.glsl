@@ -41,8 +41,9 @@ layout(scalar, set = 0, binding = 1) uniform DisplayData {
 } display_data;
 
 // Push constants (updated each frame)
-layout(push_constant) uniform PushConstants {
+layout(push_constant, std430) uniform PushConstants {
     vec2 rotation;
+    uint is_stereo;
     // TODO: add camera?
 } pcs;
 
@@ -99,8 +100,9 @@ void main() {
     float phi = acos(rotated_dir.y);
     
     // Convert spherical coords to normalized UV coords
-    //  * offset Y-coordinate based on view layer (image is top/bottom stereo)
-    vec2 uv = vec2(theta / TWO_PI, 0.5 * (phi / PI) + 0.5 * float(view_id));
+    //  * offset Y-coordinate based on view layer (if image is top/bottom stereo)
+    float s3d = float(pcs.is_stereo);
+    vec2 uv = vec2(theta / TWO_PI, (1.0 - 0.5 * s3d) * (phi / PI) + (0.5 * s3d * float(view_id)));
     
     // Sample the texture directly for the final pixel color
     FragColor = texture(tex_sampler, uv);

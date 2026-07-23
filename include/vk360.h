@@ -93,6 +93,10 @@ namespace vk360 {
         VkSampler sampler = VK_NULL_HANDLE;
         bool stereo = false;
     };
+    struct PushConst360 {
+        float rotation[2];
+        uint32_t is_stereo;
+    };
 
     class Vulkan360 {
     private:
@@ -128,6 +132,7 @@ namespace vk360 {
 
         VulkanData _vk;
         bool _is_stereo;
+        float _view_rotation[2];
         DisplayConfig* _config;
 
         void createVulkanInstance(VkInstance* instance_ptr);
@@ -147,6 +152,13 @@ namespace vk360 {
         int findMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties);
         void transitionImageLayoutToGeneral(VkImage image, VkFormat format, uint32_t layers);
         void loadShaderModule(const char* path, VkShaderModule* shader_ptr);
+        void beginCommandBuffer(VulkanRenderBuffer& rb);
+        void dipatchMenuCompute(VulkanRenderBuffer& rb);
+        void beginRenderPass(VulkanRenderBuffer& rb);
+        void drawTestScreen(VulkanRenderBuffer& rb);
+        void draw360Image(VulkanRenderBuffer& rb);
+        void draw3dMenu(VulkanRenderBuffer& rb);
+        void endCommandBufferAndSubmit(VulkanRenderBuffer& rb);
 
     public:
         Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo, DisplayConfig* config);
@@ -161,8 +173,7 @@ namespace vk360 {
         void getExternalWaitFinishedSemaphoreHandle(uint32_t index, int* ext_handle);
 #endif
         void loadImage(const char* path, bool is_stereo);
-        int drawTestScreen();
-        int drawMonoImage(float* rotation);
-        int drawStereoImage(float* rotation);
+        void setViewRotation(float yaw, float pitch);
+        int drawFrame();
     };
 }

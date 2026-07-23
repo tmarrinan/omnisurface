@@ -592,216 +592,51 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
     _vk.media360.stereo = is_stereo;
 }
 
-int vk360::Vulkan360::drawTestScreen()
+void vk360::Vulkan360::setViewRotation(float yaw, float pitch)
 {
-    // Get back buffer - resources to render image into
-    VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
-
-    // Wait for prior frame resources to be available to overwrite
-    vkWaitForFences(_vk.device, 1, &buf.in_flight_fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(_vk.device, 1, &buf.in_flight_fence);
-
-    // Reset command buffer
-    vkResetCommandBuffer(buf.cmd, 0);
-
-    // Record draw commands
-    VkCommandBufferBeginInfo begin_info{};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    if (vkBeginCommandBuffer(buf.cmd, &begin_info) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to begin recording command buffer\n");
-    }
-
-    //
-    // Begin: Render (clear each eye a different color)
-    //
-    VkImageMemoryBarrier barrier_to_clear{};
-    barrier_to_clear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier_to_clear.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier_to_clear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier_to_clear.srcAccessMask = 0;
-    barrier_to_clear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier_to_clear.image = buf.image.vk_img_data.image;
-    barrier_to_clear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier_to_clear.subresourceRange.baseMipLevel = 0;
-    barrier_to_clear.subresourceRange.levelCount = 1;
-    barrier_to_clear.subresourceRange.baseArrayLayer = 0;
-    barrier_to_clear.subresourceRange.layerCount = buf.image.vk_img_data.layers;
-
-    vkCmdPipelineBarrier(buf.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier_to_clear);
-
-    VkClearColorValue clear_color_left = { {0.2f, 0.3f, 0.5f, 1.0f} };
-    VkClearColorValue clear_color_right = { {0.6f, 0.2f, 0.2f, 1.0f} };
-
-    VkImageSubresourceRange range_left{};
-    range_left.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range_left.baseMipLevel = 0;
-    range_left.levelCount = 1;
-    range_left.baseArrayLayer = 0;
-    range_left.layerCount = 1;
-
-    vkCmdClearColorImage(buf.cmd, buf.image.vk_img_data.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color_left, 1, &range_left);
-
-    if (buf.image.vk_img_data.layers > 1)
-    {
-        VkImageSubresourceRange range_right{};
-        range_right.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        range_right.baseMipLevel = 0;
-        range_right.levelCount = 1;
-        range_right.baseArrayLayer = 1;
-        range_right.layerCount = 1;
-
-        vkCmdClearColorImage(buf.cmd, buf.image.vk_img_data.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color_right, 1, &range_right);
-    }
-
-    VkImageMemoryBarrier barrier_to_present = barrier_to_clear;
-    barrier_to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier_to_present.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier_to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier_to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-
-    vkCmdPipelineBarrier(buf.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier_to_present);
-
-    if (vkEndCommandBuffer(buf.cmd) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to record command buffer\n");
-    }
-
-    //
-    // End: Render
-    //
-
-
-    // Submit your recorded drawing commands
-    VkSemaphore wait_semaphores[] = { buf.sem_vk_available.semaphore };
-    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
-    VkSemaphore signal_semaphores[] = { buf.sem_vk_finished.semaphore };
-
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = wait_semaphores;
-    submit_info.pWaitDstStageMask = wait_stages;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &buf.cmd;
-    submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = signal_semaphores;
-
-    if (vkQueueSubmit(_vk.queue, 1, &submit_info, buf.in_flight_fence)  != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
-    }
-
-    int render_buf_idx = _vk.render_buffer_index;
-    _vk.render_buffer_index = 1 - _vk.render_buffer_index; // toggle between 0 and 1
-
-    return render_buf_idx;
+    _view_rotation[0] = yaw;
+    _view_rotation[1] = pitch;
 }
 
-int vk360::Vulkan360::drawMonoImage(float* rotation)
+int vk360::Vulkan360::drawFrame()
 {
     // Get back buffer - resources to render image into
     VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
 
-    // Wait for prior frame resources to be available to overwrite
-    vkWaitForFences(_vk.device, 1, &buf.in_flight_fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(_vk.device, 1, &buf.in_flight_fence);
+    // Prepare command buffer
+    beginCommandBuffer(buf);
 
-    // Reset command buffer
-    vkResetCommandBuffer(buf.cmd, 0);
-
-    // Record draw commands
-    VkCommandBufferBeginInfo begin_info{};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    if (vkBeginCommandBuffer(buf.cmd, &begin_info) != VK_SUCCESS)
+    // Draw test screen (if no image loaded)
+    if (_vk.media360.image == VK_NULL_HANDLE)
     {
-        fprintf(stderr, "Vulkan360> Error: failed to begin recording command buffer\n");
+        drawTestScreen(buf);
     }
 
-    //
-    // Begin: Render (draw full screen quad)
-    //
-
-    // Configure the render pass execution
-    VkClearValue clear_color = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-
-    VkRenderPassBeginInfo render_pass_info{};
-    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render_pass_info.renderPass = _vk.render_pass;
-    render_pass_info.framebuffer = buf.framebuffer;
-    render_pass_info.renderArea.offset = { 0, 0 };
-    render_pass_info.renderArea.extent = _vk.extent;
-    render_pass_info.clearValueCount = 1;
-    render_pass_info.pClearValues = &clear_color;
-     
-    // Start the render pass
-    vkCmdBeginRenderPass(buf.cmd, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
-
-    // Bind graphics pipeline
-    vkCmdBindPipeline(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline);
-
-    // Draw fullscreen quad
-    vkCmdBindDescriptorSets(buf.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout,
-        0, 1, &_vk.desc, 0, nullptr);
-    vkCmdPushConstants(buf.cmd, _vk.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 2 * sizeof(float), rotation);
-
-    vkCmdDraw(buf.cmd, 6, 1, 0, 0);
-
-    // End the render pass
-    vkCmdEndRenderPass(buf.cmd);
-
-    if (vkEndCommandBuffer(buf.cmd) != VK_SUCCESS)
+    // Render scene
+    else
     {
-        fprintf(stderr, "Vulkan360> Error: failed to record command buffer\n");
+        // Run compute pass for indirect menu draw
+        dipatchMenuCompute(buf);
+
+        // Begin render pass
+        beginRenderPass(buf);
+
+        // Draw 360 image
+        draw360Image(buf);
+
+        // Draw 3D menu
+        draw3dMenu(buf);
+
+        // End render pass
+        vkCmdEndRenderPass(buf.cmd);
     }
 
-    //
-    // End: Render
-    //
+    // End command buffer and submit
+    endCommandBufferAndSubmit(buf);
 
-
-    // Submit your recorded drawing commands
-    VkSemaphore wait_semaphores[] = { buf.sem_vk_available.semaphore };
-    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
-    VkSemaphore signal_semaphores[] = { buf.sem_vk_finished.semaphore };
-
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = wait_semaphores;
-    submit_info.pWaitDstStageMask = wait_stages;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &buf.cmd;
-    submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = signal_semaphores;
-
-    if (vkQueueSubmit(_vk.queue, 1, &submit_info, buf.in_flight_fence) != VK_SUCCESS)
-    {
-        fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
-    }
-
+    // Swap buffers (toggle between 0 and 1)
     int render_buf_idx = _vk.render_buffer_index;
-    _vk.render_buffer_index = 1 - _vk.render_buffer_index; // toggle between 0 and 1
-
-    return render_buf_idx;
-}
-
-int vk360::Vulkan360::drawStereoImage(float* rotation)
-{
-    // Get back buffer - resources to render image into
-    VulkanRenderBuffer& buf = _vk.render_buffer[_vk.render_buffer_index];
-
-    // ...
-
-
-    int render_buf_idx = _vk.render_buffer_index;
-    _vk.render_buffer_index = 1 - _vk.render_buffer_index; // toggle between 0 and 1
+    _vk.render_buffer_index = 1 - _vk.render_buffer_index;
 
     return render_buf_idx;
 }
@@ -1388,7 +1223,7 @@ void vk360::Vulkan360::createGraphicsPipeline(VkPipeline* pipeline_ptr, VkPipeli
     VkPushConstantRange push_constant_range{};
     push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     push_constant_range.offset = 0;
-    push_constant_range.size = 2 * sizeof(float);
+    push_constant_range.size = sizeof(PushConst360);
 
     VkPipelineLayoutCreateInfo pipeline_layout_info{};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1590,5 +1425,149 @@ void vk360::Vulkan360::loadShaderModule(const char* path, VkShaderModule* shader
         fprintf(stderr, "Vulkan360> Error: Failed to create `VkShaderModule`\n");
         *shader_ptr = VK_NULL_HANDLE;
         return;
+    }
+}
+
+void vk360::Vulkan360::beginCommandBuffer(VulkanRenderBuffer& rb)
+{
+    // Wait for prior frame resources to be available to overwrite
+    vkWaitForFences(_vk.device, 1, &rb.in_flight_fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(_vk.device, 1, &rb.in_flight_fence);
+
+    // Reset command buffer
+    vkResetCommandBuffer(rb.cmd, 0);
+
+    // Record draw commands
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    if (vkBeginCommandBuffer(rb.cmd, &begin_info) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to begin recording command buffer\n");
+    }
+}
+
+void vk360::Vulkan360::dipatchMenuCompute(VulkanRenderBuffer& rb)
+{
+
+}
+
+void vk360::Vulkan360::beginRenderPass(VulkanRenderBuffer& rb)
+{
+    // Configure the render pass execution
+    VkClearValue clear_color = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+
+    VkRenderPassBeginInfo render_pass_info{};
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_info.renderPass = _vk.render_pass;
+    render_pass_info.framebuffer = rb.framebuffer;
+    render_pass_info.renderArea.offset = { 0, 0 };
+    render_pass_info.renderArea.extent = _vk.extent;
+    render_pass_info.clearValueCount = 1;
+    render_pass_info.pClearValues = &clear_color;
+
+    // Start the render pass
+    vkCmdBeginRenderPass(rb.cmd, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+void vk360::Vulkan360::drawTestScreen(VulkanRenderBuffer& rb)
+{
+    // Render (clear each eye a different color)
+    VkImageMemoryBarrier barrier_to_clear{};
+    barrier_to_clear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier_to_clear.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier_to_clear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier_to_clear.srcAccessMask = 0;
+    barrier_to_clear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier_to_clear.image = rb.image.vk_img_data.image;
+    barrier_to_clear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier_to_clear.subresourceRange.baseMipLevel = 0;
+    barrier_to_clear.subresourceRange.levelCount = 1;
+    barrier_to_clear.subresourceRange.baseArrayLayer = 0;
+    barrier_to_clear.subresourceRange.layerCount = rb.image.vk_img_data.layers;
+
+    vkCmdPipelineBarrier(rb.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier_to_clear);
+
+    VkClearColorValue clear_color_left = { {0.2f, 0.3f, 0.6f, 1.0f} };
+    VkClearColorValue clear_color_right = { {0.8f, 0.2f, 0.2f, 1.0f} };
+
+    VkImageSubresourceRange range_left{};
+    range_left.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range_left.baseMipLevel = 0;
+    range_left.levelCount = 1;
+    range_left.baseArrayLayer = 0;
+    range_left.layerCount = 1;
+
+    vkCmdClearColorImage(rb.cmd, rb.image.vk_img_data.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color_left, 1, &range_left);
+
+    if (rb.image.vk_img_data.layers > 1)
+    {
+        VkImageSubresourceRange range_right{};
+        range_right.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        range_right.baseMipLevel = 0;
+        range_right.levelCount = 1;
+        range_right.baseArrayLayer = 1;
+        range_right.layerCount = 1;
+
+        vkCmdClearColorImage(rb.cmd, rb.image.vk_img_data.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color_right, 1, &range_right);
+    }
+
+    VkImageMemoryBarrier barrier_to_present = barrier_to_clear;
+    barrier_to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier_to_present.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier_to_present.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier_to_present.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+    vkCmdPipelineBarrier(rb.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier_to_present);
+}
+
+void vk360::Vulkan360::draw360Image(VulkanRenderBuffer& rb)
+{
+    // Bind graphics pipeline
+    vkCmdBindPipeline(rb.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline);
+
+    // Draw fullscreen quad
+    PushConst360 pc{ {_view_rotation[0], _view_rotation[1]}, static_cast<uint32_t>(_vk.media360.stereo) };
+    vkCmdBindDescriptorSets(rb.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout,
+        0, 1, &_vk.desc, 0, nullptr);
+    vkCmdPushConstants(rb.cmd, _vk.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConst360), &pc);
+
+    vkCmdDraw(rb.cmd, 6, 1, 0, 0);
+}
+
+void vk360::Vulkan360::draw3dMenu(VulkanRenderBuffer& rb)
+{
+
+}
+
+void vk360::Vulkan360::endCommandBufferAndSubmit(VulkanRenderBuffer& rb)
+{
+    // End command buffer
+    if (vkEndCommandBuffer(rb.cmd) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to record command buffer\n");
+    }
+
+    // Submit recorded commands
+    VkSemaphore wait_semaphores[] = { rb.sem_vk_available.semaphore };
+    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
+    VkSemaphore signal_semaphores[] = { rb.sem_vk_finished.semaphore };
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = wait_semaphores;
+    submit_info.pWaitDstStageMask = wait_stages;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &rb.cmd;
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = signal_semaphores;
+
+    if (vkQueueSubmit(_vk.queue, 1, &submit_info, rb.in_flight_fence) != VK_SUCCESS)
+    {
+        fprintf(stderr, "Vulkan360> Error: failed to submit draw command buffer\n");
     }
 }
