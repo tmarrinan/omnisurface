@@ -3,20 +3,20 @@ Monitor: 0
 Surface Count: 3, 1
 [
   Base Shape: plane
-  Bottom Left: -0.5, 0.0, 0.0
-  Bottom Right: -0.5, 0.0, -1.0
-  Top Left: -0.5, 1.875, 0.0
+  Bottom Left: -0.5, 0.0, 0.5
+  Bottom Right: -0.5, 0.0, -0.5
+  Top Left: -0.5, 1.875, 0.5
 ]
 [
   Base Shape: plane
-  Bottom Left: -0.5, 0.0, -1.0
-  Bottom Right: 0.5, 0.0, -1.0
-  Top Left: -0.5, 1.875, -1.0
+  Bottom Left: -0.5, 0.0, -0.5
+  Bottom Right: 0.5, 0.0, -0.5
+  Top Left: -0.5, 1.875, -0.5
 ]
 [
   Base Shape: plane
-  Bottom Left: 0.5, 0.0, -1.0
-  Bottom Right: 0.5, 0.0, 0.0
-  Top Left: 0.5, 1.875, -1.0
+  Bottom Left: 0.5, 0.0, -0.5
+  Bottom Right: 0.5, 0.0, 0.5
+  Top Left: 0.5, 1.875, -0.5
 ]
 Origin: 0.0, 0.0, 0.0

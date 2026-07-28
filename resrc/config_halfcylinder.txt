@@ -3,10 +3,10 @@ Monitor: 0
 Surface Count: 1, 1
 [
   Base Shape: cylinder
-  Radius: 1.0
-  Bottom Height: 0.0
-  Top Height: 1.875
-  Left Angle: 330.0
-  Right Angle: 210.0
+  Radius: 3.4866
+  Bottom Height: 0.05
+  Top Height: 2.4125
+  Left Angle: 0.0
+  Right Angle: 180.0
 ]
 Origin: 0.0, 0.0, 0.0
