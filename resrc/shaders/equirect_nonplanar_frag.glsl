@@ -42,14 +42,12 @@ layout(scalar, set = 0, binding = 1) uniform DisplayData {
 
 // Push constants (updated each frame)
 layout(push_constant, std430) uniform PushConstants {
-    vec2 rotation;
-    uint is_stereo;
-    // TODO: add camera?
+    layout(offset =  0) vec3 camera;
+    layout(offset = 16) vec2 rotation;
+    layout(offset = 24) uint is_stereo;
 } pcs;
 
-void main() {
-    vec3 camera = vec3(0.0, 1.0, 0.0); // TODO: handle eye separation
-    
+void main() {    
     // Calculate which region current fragment is on
     vec2 region_size = ceil(display_data.resolution / vec2(display_data.grid_dims));    
     int col = int(gl_FragCoord.x / region_size.x);
@@ -80,7 +78,7 @@ void main() {
     }
     
     // Calculate spherical direction of fragment
-    vec3 frag_dir = normalize(frag_pos_world - camera);
+    vec3 frag_dir = normalize(frag_pos_world - pcs.camera);
     float cos_rx = cos(-pcs.rotation.x);
     float sin_rx = sin(-pcs.rotation.x);
     float cos_ry = cos(pcs.rotation.y);

@@ -94,7 +94,8 @@ namespace vk360 {
         bool stereo = false;
     };
     struct PushConst360 {
-        float rotation[2];
+        float camera_position[3];
+        alignas(16) float rotation[2];
         uint32_t is_stereo;
     };
 
@@ -132,6 +133,7 @@ namespace vk360 {
 
         VulkanData _vk;
         bool _is_stereo;
+        float _camera_position[3];
         float _view_rotation[2];
         DisplayConfig* _config;
 
@@ -173,6 +175,7 @@ namespace vk360 {
         void getExternalWaitFinishedSemaphoreHandle(uint32_t index, int* ext_handle);
 #endif
         void loadImage(const char* path, bool is_stereo);
+        void setCameraPosition(float x, float y, float z);
         void setViewRotation(float yaw, float pitch);
         int drawFrame();
     };

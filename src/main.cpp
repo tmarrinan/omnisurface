@@ -40,6 +40,7 @@ struct InteractionState {
     bool mouse_button_down[2];
     double cursor_pos[2];
     double cursor_delta[2];
+    bool camera_move[6];
 };
 
 // Function definitions
@@ -48,14 +49,15 @@ void importExternalTextureArray(vk360::ExternalImageInfo& ext_img_info, GLuint* 
 void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void mouseMoveCallback(GLFWwindow* window, double xpos, double ypos);
+void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 // Main program
 int main()
 {
     // Read in display configuration
     vk360::DisplayConfig *config = new vk360::DisplayConfig();
-    if (!config->loadFromFile("resrc/config_3plane.txt"))
-    //if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
+    //if (!config->loadFromFile("resrc/config_3plane.txt"))
+    if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
     {
         fprintf(stderr, "OmniSurface> Error: Failed to read config file\n");
         return EXIT_FAILURE;
@@ -76,13 +78,11 @@ int main()
 
     // Register mouse event callbacks
     InteractionState interaction{};
-    interaction.mouse_button_down[0] = false;
-    interaction.mouse_button_down[1] = false;
-    interaction.cursor_pos[0] = 0.0;
-    interaction.cursor_pos[1] = 0.0;
+    memset(&interaction, 0, sizeof(InteractionState));
     glfwSetWindowUserPointer(window, &interaction);
     glfwSetMouseButtonCallback(window, mouseButtonCallback);
     glfwSetCursorPosCallback(window, mouseMoveCallback);
+    glfwSetKeyCallback(window, keyboardCallback);
 
     // Query the GPU name and UUID from the active OpenGL context
     const GLubyte* renderer = glGetString(GL_RENDERER);
@@ -145,6 +145,7 @@ int main()
     //  - X [-180, 180] --> rollover (X < -180.0 ? add 360.0; X > 180.0 ? subtract 360.0)
     //  - Y [-45, 45] --> clamp
     float rotation[2] = { 0.0, 0.0 };
+    float camera_position[3] = { 0.0, 1.8, 0.0 };
     while (!glfwWindowShouldClose(window))
     {
         // Poll for user events
@@ -155,6 +156,15 @@ int main()
         {
             glfwSetWindowShouldClose(window, true);
         }
+
+        // Update position (TODO: modify to account for delta time)
+        if (interaction.camera_move[0]) camera_position[0] -= 0.05;
+        if (interaction.camera_move[1]) camera_position[0] += 0.05;
+        if (interaction.camera_move[2]) camera_position[1] -= 0.05;
+        if (interaction.camera_move[3]) camera_position[1] += 0.05;
+        if (interaction.camera_move[4]) camera_position[2] -= 0.05;
+        if (interaction.camera_move[5]) camera_position[2] += 0.05;
+        app->setCameraPosition(camera_position[0], camera_position[1], camera_position[2]);
 
         // Update rotation
         if (interaction.mouse_button_down[0])
@@ -334,4 +344,38 @@ void mouseMoveCallback(GLFWwindow* window, double xpos, double ypos)
     state->cursor_delta[1] = ypos - state->cursor_pos[1];
     state->cursor_pos[0] = xpos;
     state->cursor_pos[1] = ypos;
+}
+
+void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    InteractionState* state = static_cast<InteractionState*>(glfwGetWindowUserPointer(window));
+    if (state == nullptr) return;
+
+    switch (key)
+    {
+    case GLFW_KEY_A:
+        if (action == GLFW_PRESS) state->camera_move[0] = true;
+        if (action == GLFW_RELEASE) state->camera_move[0] = false;
+        break;
+    case GLFW_KEY_D:
+        if (action == GLFW_PRESS) state->camera_move[1] = true;
+        if (action == GLFW_RELEASE) state->camera_move[1] = false;
+        break;
+    case GLFW_KEY_S:
+        if (action == GLFW_PRESS) state->camera_move[2] = true;
+        if (action == GLFW_RELEASE) state->camera_move[2] = false;
+        break;
+    case GLFW_KEY_W:
+        if (action == GLFW_PRESS) state->camera_move[3] = true;
+        if (action == GLFW_RELEASE) state->camera_move[3] = false;
+        break;
+    case GLFW_KEY_R:
+        if (action == GLFW_PRESS) state->camera_move[4] = true;
+        if (action == GLFW_RELEASE) state->camera_move[4] = false;
+        break;
+    case GLFW_KEY_F:
+        if (action == GLFW_PRESS) state->camera_move[5] = true;
+        if (action == GLFW_RELEASE) state->camera_move[5] = false;
+        break;
+    }
 }

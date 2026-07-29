@@ -278,6 +278,12 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 vk360::Vulkan360::Vulkan360(uint8_t* device_uuid, uint32_t width, uint32_t height, bool is_stereo, DisplayConfig* config) :
     _is_stereo{ is_stereo }, _config{ config }
 {
+    
+    _camera_position[0] = 0.0f;
+    _camera_position[0] = 1.8f;
+    _camera_position[0] = 0.0f;
+    _view_rotation[0] = 0.0f;
+    _view_rotation[1] = 0.0f;
     _vk.extent.width = width;
     _vk.extent.height = height;
     VkFormat fbo_color_format = VK_FORMAT_R8G8B8A8_SRGB;
@@ -590,6 +596,13 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
     vkUpdateDescriptorSets(_vk.device, 2, desc_writes, 0, nullptr);
 
     _vk.media360.stereo = is_stereo;
+}
+
+void vk360::Vulkan360::setCameraPosition(float x, float y, float z)
+{
+    _camera_position[0] = x;
+    _camera_position[1] = y;
+    _camera_position[2] = z;
 }
 
 void vk360::Vulkan360::setViewRotation(float yaw, float pitch)
@@ -1530,7 +1543,11 @@ void vk360::Vulkan360::draw360Image(VulkanRenderBuffer& rb)
     vkCmdBindPipeline(rb.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline);
 
     // Draw fullscreen quad
-    PushConst360 pc{ {_view_rotation[0], _view_rotation[1]}, static_cast<uint32_t>(_vk.media360.stereo) };
+    PushConst360 pc{
+        {_camera_position[0], _camera_position[1], _camera_position[2]},
+        {_view_rotation[0], _view_rotation[1]},
+        static_cast<uint32_t>(_vk.media360.stereo)
+    };
     vkCmdBindDescriptorSets(rb.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _vk.pipeline_layout,
         0, 1, &_vk.desc, 0, nullptr);
     vkCmdPushConstants(rb.cmd, _vk.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConst360), &pc);
