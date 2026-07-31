@@ -1,0 +1,3 @@
+[submodule "extern/DTrackSDK"]
+	path = extern/DTrackSDK
+	url = https://github.com/ar-tracking/DTrackSDK

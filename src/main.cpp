@@ -15,6 +15,7 @@ extern "C" {
 }
 #endif
 
+#include "DTrackSDK.hpp"
 #include "vk360.h"
 
 #ifndef M_PI
@@ -129,6 +130,19 @@ int main()
                 fprintf(stderr, "OmniSurface> Error: failed to create framebuffer object\n");
             }
         }
+    }
+
+    // Connect to DTrack tracking system
+    std::string dtrack_ip = "127.0.0.1";
+    uint16_t data_port = 3000;
+    DTrackSDK* dt = new DTrackSDK(dtrack_ip, data_port);
+    if (!dt->isCommandInterfaceValid() || !dt->isDataInterfaceValid())
+    {
+        fprintf(stderr, "OmniSurface> Warning: failed to connect to DTrackSDK\n");
+    }
+    else
+    {
+        printf("OmniSurface> Info: DTrackSDK listening on port %u\n", dt->getDataPort());
     }
 
     // Initialize OpenGL settings

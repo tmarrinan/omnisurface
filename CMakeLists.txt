@@ -29,6 +29,10 @@ elseif(UNIX)
 endif()
 
 
+# Add submodule for DTrack SDK
+add_subdirectory(extern/DTrackSDK)
+
+
 # Main project
 add_executable(${PROJECT_NAME})
 
@@ -66,6 +70,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Vulkan::Vulkan
     glfw
     GLAD
+    DTrackSDK_LIB
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
