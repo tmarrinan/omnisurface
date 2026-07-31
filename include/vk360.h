@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #if defined(_WIN32)
@@ -28,17 +29,25 @@ namespace vk360 {
         GLSLDisplaySurface surfaces[32];
     };
 
+    enum TrackingSystem : uint8_t { NONE, DTRACK, VRPN };
+
     class DisplayConfig {
     private:
         int _monitor_index;
         uint32_t _display_grid[2];
         std::vector<GLSLDisplaySurface*> _surfaces;
         float _origin[3];
+        TrackingSystem _tracking_type;
+        std::string _tracking_ip;
+        uint16_t _tracking_port;
     public:
         DisplayConfig();
         ~DisplayConfig();
 
         bool loadFromFile(const char* config_filename);
+        TrackingSystem getTrackingSystemType();
+        std::string getTrackingIpAddress();
+        uint16_t getTrackingPort();
         int getMonitor();
         uint32_t getNumberOfDisplayColumns();
         uint32_t getNumberOfDisplayRows();

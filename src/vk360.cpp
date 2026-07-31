@@ -15,8 +15,10 @@
 
 
 vk360::DisplayConfig::DisplayConfig() :
-    _monitor_index{ 0 }
+    _monitor_index{ 0 }, _tracking_type{ TrackingSystem::NONE }, _tracking_ip{ "127.0.0.1" }, _tracking_port{ 0 }
 {
+    _display_grid[0] = 1;
+    _display_grid[1] = 1;
     _origin[0] = 0.0;
     _origin[1] = 0.0;
     _origin[2] = 0.0;
@@ -50,6 +52,24 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
             fprintf(stderr, "DisplayConfig> Error: config file format not recognized - 1st line should be 'OmniSurface Config'\n");
             return false;
         }
+        else if (line.length() >= 18 && line.substr(0, 17) == "Camera Tracking: ")
+        {
+            size_t comma1 = line.find(',');
+            size_t comma2 = line.find(',', comma1 + 1);
+            if (comma1 == std::string::npos || comma2 == std::string::npos)
+            {
+                fprintf(stderr, "OmniSurface> Error: config file format not recognized - camera tracking expects 3 comma separated values\n");
+                return false;
+            }
+            std::string tracking_type = line.substr(17, comma1 - 17);
+            if (tracking_type == "DTrack") _tracking_type = TrackingSystem::DTRACK;
+            else if (tracking_type == "VRPN") _tracking_type = TrackingSystem::VRPN;
+            std::string tracking_ip = line.substr(comma1 + 1, comma2 - comma1 - 1);
+            size_t start = tracking_ip.find_first_not_of(" \t\n\r\f\v");
+            size_t end = tracking_ip.find_last_not_of(" \t\n\r\f\v");
+            _tracking_ip = tracking_ip.substr(start, end - start + 1);
+            _tracking_port = std::stoul(line.substr(comma2 + 1));
+        }
         else if (line.length() >= 10 && line.substr(0, 9) == "Monitor: ")
         {
             _monitor_index = std::stoi(line.substr(9));
@@ -62,7 +82,7 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                 fprintf(stderr, "OmniSurface> Error: config file format not recognized - surface count expects 2 comma separated numbers\n");
                 return false;
             }
-            _display_grid[0] = std::stoul(line.substr(15, comma));
+            _display_grid[0] = std::stoul(line.substr(15, comma - 15));
             _display_grid[1] = std::stoul(line.substr(comma + 1));
 
             size_t surface_count = _display_grid[0] * _display_grid[1];
@@ -115,7 +135,7 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                         fprintf(stderr, "OmniSurface> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
                         return false;
                     }
-                    _surfaces[surface_idx]->d1[0] = std::stof(line.substr(13, comma1));
+                    _surfaces[surface_idx]->d1[0] = std::stof(line.substr(13, comma1 - 13));
                     _surfaces[surface_idx]->d1[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
                     _surfaces[surface_idx]->d1[2] = std::stof(line.substr(comma2 + 1));
                 }
@@ -128,7 +148,7 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                         fprintf(stderr, "OmniSurface> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
                         return false;
                     }
-                    _surfaces[surface_idx]->d2[0] = std::stof(line.substr(14, comma1));
+                    _surfaces[surface_idx]->d2[0] = std::stof(line.substr(14, comma1 - 14));
                     _surfaces[surface_idx]->d2[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
                     _surfaces[surface_idx]->d2[2] = std::stof(line.substr(comma2 + 1));
                 }
@@ -141,7 +161,7 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                         fprintf(stderr, "OmniSurface> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
                         return false;
                     }
-                    _surfaces[surface_idx]->d3[0] = std::stof(line.substr(10, comma1));
+                    _surfaces[surface_idx]->d3[0] = std::stof(line.substr(10, comma1 - 10));
                     _surfaces[surface_idx]->d3[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
                     _surfaces[surface_idx]->d3[2] = std::stof(line.substr(comma2 + 1));
                 }
@@ -177,7 +197,7 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
                 fprintf(stderr, "DisplayConfig> Error: config file format not recognized - coordinate expects 3 comma separated numbers\n");
                 return false;
             }
-            _origin[0] = std::stof(line.substr(8, comma1));
+            _origin[0] = std::stof(line.substr(8, comma1 - 8));
             _origin[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
             _origin[2] = std::stof(line.substr(comma2 + 1));
         }
@@ -187,6 +207,21 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
 
     config_file.close();
     return true;
+}
+
+vk360::TrackingSystem vk360::DisplayConfig::getTrackingSystemType()
+{
+    return _tracking_type;
+}
+
+std::string vk360::DisplayConfig::getTrackingIpAddress()
+{
+    return _tracking_ip;
+}
+
+uint16_t vk360::DisplayConfig::getTrackingPort()
+{
+    return _tracking_port;
 }
 
 int vk360::DisplayConfig::getMonitor()
@@ -232,6 +267,19 @@ void vk360::DisplayConfig::printConfig()
 {
     // TODO: maybe store 4 corners of planar surface instead of center and normal and size
     printf("********* OmniSurface Config *********\n");
+    if (_tracking_type == TrackingSystem::NONE)
+    {
+        printf("Camera Tracking: None\n");
+    }
+    else
+    {
+        std::string tracking_type = "unknown";
+        if (_tracking_type == TrackingSystem::DTRACK) tracking_type = "DTrack";
+        else if (_tracking_type == TrackingSystem::VRPN) tracking_type = "VRPN";
+        printf("Camera Tracking: %s\n", tracking_type.c_str());
+        printf("  IP: %s\n", _tracking_ip.c_str());
+        printf("  Port: %hu\n", _tracking_port);
+    }
     printf("Monitor: %u\n", _monitor_index);
     printf("Display Grid: %ux%u\n", _display_grid[0], _display_grid[1]);
     printf("Origin: (%.4f, %.4f, %.4f)\n", _origin[0], _origin[1], _origin[2]);

@@ -2,6 +2,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <thread>
 #include <glad/gl.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -44,6 +45,11 @@ struct InteractionState {
     bool camera_move[6];
 };
 
+struct TrackSyncData {
+    bool exit;
+    float camera_position[3];
+};
+
 // Function definitions
 GLFWwindow* createFullscreenWindow(const char* title, int monitor_idx, int* width, int* height, bool* is_stereo);
 void importExternalTextureArray(vk360::ExternalImageInfo& ext_img_info, GLuint* texture);
@@ -51,6 +57,7 @@ void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void mouseMoveCallback(GLFWwindow* window, double xpos, double ypos);
 void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+void dtrackTask(std::string ip_address, uint16_t port, TrackSyncData* tracking_data);
 
 // Main program
 int main()
@@ -132,17 +139,21 @@ int main()
         }
     }
 
-    // Connect to DTrack tracking system
-    std::string dtrack_ip = "127.0.0.1";
-    uint16_t data_port = 3000;
-    DTrackSDK* dt = new DTrackSDK(dtrack_ip, data_port);
-    if (!dt->isCommandInterfaceValid() || !dt->isDataInterfaceValid())
+    // Connect to tracking system
+    std::thread tracking_thread;
+    TrackSyncData* tracking_data = new TrackSyncData();
+    tracking_data->exit = false;
+    tracking_data->camera_position[0] = 0.0;
+    tracking_data->camera_position[1] = 1.8;
+    tracking_data->camera_position[2] = 0.0;
+    const vk360::TrackingSystem tracking_type = config->getTrackingSystemType();
+    if (tracking_type == vk360::TrackingSystem::DTRACK)
     {
-        fprintf(stderr, "OmniSurface> Warning: failed to connect to DTrackSDK\n");
+        tracking_thread = std::thread(dtrackTask, config->getTrackingIpAddress(), config->getTrackingPort(), tracking_data);
     }
-    else
+    else if (tracking_type == vk360::TrackingSystem::VRPN)
     {
-        printf("OmniSurface> Info: DTrackSDK listening on port %u\n", dt->getDataPort());
+        // TODO: fill this in
     }
 
     // Initialize OpenGL settings
@@ -169,6 +180,7 @@ int main()
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         {
             glfwSetWindowShouldClose(window, true);
+            tracking_data->exit = true;
         }
 
         // Update position (TODO: modify to account for delta time)
@@ -196,6 +208,9 @@ int main()
         interaction.cursor_delta[1] = 0.0;
         app->setViewRotation(rotation[0], rotation[1]);
 
+        // Updates from camera tracking
+        // TODO: implement here (std::thread actually pulls data, just check if new data exists here)
+
         // Trigger render (Vulkan)
         uint32_t buffer_idx = app->drawFrame();
 
@@ -220,6 +235,8 @@ int main()
         glSignalSemaphoreEXT(present[buffer_idx].sem_signal_available, 0, nullptr, 1, buffers, layouts);
         glFlush();
     }
+
+    if (tracking_thread.joinable()) tracking_thread.join();
 
     return EXIT_SUCCESS;
 }
@@ -391,5 +408,36 @@ void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int
         if (action == GLFW_PRESS) state->camera_move[5] = true;
         if (action == GLFW_RELEASE) state->camera_move[5] = false;
         break;
+    }
+}
+
+void dtrackTask(std::string ip_address, uint16_t port, TrackSyncData* tracking_data)
+{
+    DTrackSDK* dt = new DTrackSDK(ip_address, port);
+    if (!dt->isCommandInterfaceValid() || !dt->isDataInterfaceValid() || !dt->startMeasurement())
+    {
+        fprintf(stderr, "OmniSurface> Warning: failed to connect to DTrack\n");
+        return;
+    }
+    
+    printf("OmniSurface> Info: DTrack listening on port %u\n", dt->getDataPort());
+    dt->setDataTimeoutUS(50000);
+    while (!tracking_data->exit)
+    {
+        if (dt->receive())
+        {
+            // TODO: use mutex, look for tracked IDs (e.g. camera), update synced data
+            printf("DTrack: received data for %d tracked bodies\n", dt->getNumBody());
+            for (int i = 0; i < dt->getNumBody(); i++)
+            {
+                const DTrackBody* body = dt->getBody(i);
+                if (body && body->isTracked())
+                {
+                    DTrackQuaternion quat = body->getQuaternion();
+                    printf("Body %3d: pos = (%.3f, %.3f, %.3f); rot = (%.3f, %.3f, %.3f, %.3f)\n", body->id,
+                        body->loc[0], body->loc[1], body->loc[2], quat.w, quat.x, quat.y, quat.z);
+                }
+            }
+        }
     }
 }
