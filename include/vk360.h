@@ -38,16 +38,18 @@ namespace vk360 {
         std::vector<GLSLDisplaySurface*> _surfaces;
         float _origin[3];
         TrackingSystem _tracking_type;
-        std::string _tracking_ip;
         uint16_t _tracking_port;
+        int _tracking_camera_id;
+        int _tracking_controller_id;
     public:
         DisplayConfig();
         ~DisplayConfig();
 
         bool loadFromFile(const char* config_filename);
         TrackingSystem getTrackingSystemType();
-        std::string getTrackingIpAddress();
         uint16_t getTrackingPort();
+        int getTrackingCameraId();
+        int getTrackingControllerId();
         int getMonitor();
         uint32_t getNumberOfDisplayColumns();
         uint32_t getNumberOfDisplayRows();

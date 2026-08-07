@@ -15,7 +15,7 @@
 
 
 vk360::DisplayConfig::DisplayConfig() :
-    _monitor_index{ 0 }, _tracking_type{ TrackingSystem::NONE }, _tracking_ip{ "127.0.0.1" }, _tracking_port{ 0 }
+    _monitor_index{ 0 }, _tracking_type{ TrackingSystem::NONE }, _tracking_port{ 0 }, _tracking_camera_id{ 0 }, _tracking_controller_id{ 0 }
 {
     _display_grid[0] = 1;
     _display_grid[1] = 1;
@@ -56,19 +56,18 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
         {
             size_t comma1 = line.find(',');
             size_t comma2 = line.find(',', comma1 + 1);
-            if (comma1 == std::string::npos || comma2 == std::string::npos)
+            size_t comma3 = line.find(',', comma2 + 1);
+            if (comma1 == std::string::npos || comma2 == std::string::npos || comma3 == std::string::npos)
             {
-                fprintf(stderr, "OmniSurface> Error: config file format not recognized - camera tracking expects 3 comma separated values\n");
+                fprintf(stderr, "OmniSurface> Error: config file format not recognized - camera tracking expects 4 comma separated values\n");
                 return false;
             }
             std::string tracking_type = line.substr(17, comma1 - 17);
             if (tracking_type == "DTrack") _tracking_type = TrackingSystem::DTRACK;
             else if (tracking_type == "VRPN") _tracking_type = TrackingSystem::VRPN;
-            std::string tracking_ip = line.substr(comma1 + 1, comma2 - comma1 - 1);
-            size_t start = tracking_ip.find_first_not_of(" \t\n\r\f\v");
-            size_t end = tracking_ip.find_last_not_of(" \t\n\r\f\v");
-            _tracking_ip = tracking_ip.substr(start, end - start + 1);
-            _tracking_port = std::stoul(line.substr(comma2 + 1));
+            _tracking_port = std::stoul(line.substr(comma1 + 1, comma2 - comma1 - 1));
+            _tracking_camera_id = std::stoul(line.substr(comma2 + 1, comma3 - comma2 - 1));
+            _tracking_controller_id = std::stoul(line.substr(comma3 + 1));
         }
         else if (line.length() >= 10 && line.substr(0, 9) == "Monitor: ")
         {
@@ -214,14 +213,19 @@ vk360::TrackingSystem vk360::DisplayConfig::getTrackingSystemType()
     return _tracking_type;
 }
 
-std::string vk360::DisplayConfig::getTrackingIpAddress()
-{
-    return _tracking_ip;
-}
-
 uint16_t vk360::DisplayConfig::getTrackingPort()
 {
     return _tracking_port;
+}
+
+int vk360::DisplayConfig::getTrackingCameraId()
+{
+    return _tracking_camera_id;
+}
+
+int vk360::DisplayConfig::getTrackingControllerId()
+{
+    return _tracking_controller_id;
 }
 
 int vk360::DisplayConfig::getMonitor()
@@ -277,8 +281,9 @@ void vk360::DisplayConfig::printConfig()
         if (_tracking_type == TrackingSystem::DTRACK) tracking_type = "DTrack";
         else if (_tracking_type == TrackingSystem::VRPN) tracking_type = "VRPN";
         printf("Camera Tracking: %s\n", tracking_type.c_str());
-        printf("  IP: %s\n", _tracking_ip.c_str());
         printf("  Port: %hu\n", _tracking_port);
+        printf("  Camera ID: %d\n", _tracking_camera_id);
+        printf("  Controller ID: %d\n", _tracking_controller_id);
     }
     printf("Monitor: %u\n", _monitor_index);
     printf("Display Grid: %ux%u\n", _display_grid[0], _display_grid[1]);

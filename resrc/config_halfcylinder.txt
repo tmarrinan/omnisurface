@@ -1,5 +1,5 @@
 OmniSurface Config
-Camera Tracking: DTrack, 192.168.5.60, 3000
+Camera Tracking: DTrack, 5000, 1, 2
 Monitor: 0
 Surface Count: 1, 1
 [

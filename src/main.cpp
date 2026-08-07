@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <mutex>
 #include <glad/gl.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -46,6 +47,8 @@ struct InteractionState {
 };
 
 struct TrackSyncData {
+    std::mutex sync_mutex;
+    bool new_data;
     bool exit;
     float camera_position[3];
 };
@@ -57,7 +60,7 @@ void importExternalSemaphore(ExternalHandle sem_handle, GLuint* semaphore);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void mouseMoveCallback(GLFWwindow* window, double xpos, double ypos);
 void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-void dtrackTask(std::string ip_address, uint16_t port, TrackSyncData* tracking_data);
+void dtrackTask(uint16_t local_port, int camera_id, int controller_id, TrackSyncData* tracking_data);
 
 // Main program
 int main()
@@ -142,6 +145,7 @@ int main()
     // Connect to tracking system
     std::thread tracking_thread;
     TrackSyncData* tracking_data = new TrackSyncData();
+    tracking_data->new_data = false;
     tracking_data->exit = false;
     tracking_data->camera_position[0] = 0.0;
     tracking_data->camera_position[1] = 1.8;
@@ -149,7 +153,7 @@ int main()
     const vk360::TrackingSystem tracking_type = config->getTrackingSystemType();
     if (tracking_type == vk360::TrackingSystem::DTRACK)
     {
-        tracking_thread = std::thread(dtrackTask, config->getTrackingIpAddress(), config->getTrackingPort(), tracking_data);
+        tracking_thread = std::thread(dtrackTask, config->getTrackingPort(), config->getTrackingCameraId(), config->getTrackingControllerId(), tracking_data);
     }
     else if (tracking_type == vk360::TrackingSystem::VRPN)
     {
@@ -180,7 +184,6 @@ int main()
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         {
             glfwSetWindowShouldClose(window, true);
-            tracking_data->exit = true;
         }
 
         // Update position (TODO: modify to account for delta time)
@@ -209,7 +212,17 @@ int main()
         app->setViewRotation(rotation[0], rotation[1]);
 
         // Updates from camera tracking
-        // TODO: implement here (std::thread actually pulls data, just check if new data exists here)
+        {
+            std::lock_guard lock(tracking_data->sync_mutex);
+            if (tracking_data->new_data)
+            {
+                camera_position[0] = tracking_data->camera_position[0];
+                camera_position[1] = tracking_data->camera_position[1];
+                camera_position[2] = tracking_data->camera_position[2];
+
+                app->setCameraPosition(camera_position[0], camera_position[1], camera_position[2]);
+            }
+        }
 
         // Trigger render (Vulkan)
         uint32_t buffer_idx = app->drawFrame();
@@ -235,6 +248,7 @@ int main()
         glSignalSemaphoreEXT(present[buffer_idx].sem_signal_available, 0, nullptr, 1, buffers, layouts);
         glFlush();
     }
+    tracking_data->exit = true;
 
     if (tracking_thread.joinable()) tracking_thread.join();
 
@@ -411,17 +425,17 @@ void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int
     }
 }
 
-void dtrackTask(std::string ip_address, uint16_t port, TrackSyncData* tracking_data)
+void dtrackTask(uint16_t local_port, int camera_id, int controller_id, TrackSyncData* tracking_data)
 {
-    DTrackSDK* dt = new DTrackSDK(ip_address, port);
-    if (!dt->isCommandInterfaceValid() || !dt->isDataInterfaceValid() || !dt->startMeasurement())
+    DTrackSDK* dt = new DTrackSDK(local_port);
+    if (!dt->isDataInterfaceValid())
     {
         fprintf(stderr, "OmniSurface> Warning: failed to connect to DTrack\n");
         return;
     }
     
-    printf("OmniSurface> Info: DTrack listening on port %u\n", dt->getDataPort());
-    dt->setDataTimeoutUS(50000);
+    printf("OmniSurface> Info: listening for DTrack data on port %u\n", dt->getDataPort());
+    dt->setDataTimeoutUS(50000); // 50 ms
     while (!tracking_data->exit)
     {
         if (dt->receive())
@@ -433,9 +447,25 @@ void dtrackTask(std::string ip_address, uint16_t port, TrackSyncData* tracking_d
                 const DTrackBody* body = dt->getBody(i);
                 if (body && body->isTracked())
                 {
-                    DTrackQuaternion quat = body->getQuaternion();
-                    printf("Body %3d: pos = (%.3f, %.3f, %.3f); rot = (%.3f, %.3f, %.3f, %.3f)\n", body->id,
-                        body->loc[0], body->loc[1], body->loc[2], quat.w, quat.x, quat.y, quat.z);
+                    if (body->id == camera_id)
+                    {
+                        DTrackQuaternion quat = body->getQuaternion();
+                        printf("CAMERA %3d: pos = (%.3f, %.3f, %.3f); rot = (%.3f, %.3f, %.3f, %.3f)\n", body->id,
+                            body->loc[0], body->loc[1], body->loc[2], quat.w, quat.x, quat.y, quat.z);
+                        {
+                            std::lock_guard lock(tracking_data->sync_mutex);
+                            tracking_data->camera_position[0] = body->loc[0];
+                            tracking_data->camera_position[1] = body->loc[1];
+                            tracking_data->camera_position[2] = body->loc[2];
+                            tracking_data->new_data = true;
+                        }
+                    }
+                    else
+                    {
+                        DTrackQuaternion quat = body->getQuaternion();
+                        printf("[BODY] %3d: pos = (%.3f, %.3f, %.3f); rot = (%.3f, %.3f, %.3f, %.3f)\n", body->id,
+                            body->loc[0], body->loc[1], body->loc[2], quat.w, quat.x, quat.y, quat.z);
+                    }
                 }
             }
         }
