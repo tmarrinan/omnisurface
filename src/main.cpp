@@ -10,6 +10,7 @@
 
 #if defined(_WIN32)
 #define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;       // Forces NVIDIA Performance GPU
@@ -18,6 +19,7 @@ extern "C" {
 #endif
 
 #include "DTrackSDK.hpp"
+#include "libwebsockets.h"
 #include "vk360.h"
 
 #ifndef M_PI
@@ -74,6 +76,11 @@ int main()
         return EXIT_FAILURE;
     }
     config->printConfig();
+
+    // TEST WS Server
+    struct lws_context_creation_info info;
+    memset(&info, 0, sizeof(info));
+    // End: TEST
 
     // Create fullscreen window
     int window_w, window_h;
@@ -170,11 +177,10 @@ int main()
     // Main render loop
     GLuint buffers[1];
     GLenum layouts[1] = { GL_LAYOUT_GENERAL_EXT };
-    // TODO: make rotation controlled interactively
-    //  - X [-180, 180] --> rollover (X < -180.0 ? add 360.0; X > 180.0 ? subtract 360.0)
-    //  - Y [-45, 45] --> clamp
     float rotation[2] = { 0.0, 0.0 };
     float camera_position[3] = { 0.0, 1.8, 0.0 };
+    float origin[3];
+    config->getOrigin(origin);
     while (!glfwWindowShouldClose(window))
     {
         // Poll for user events
@@ -216,9 +222,9 @@ int main()
             std::lock_guard lock(tracking_data->sync_mutex);
             if (tracking_data->new_data)
             {
-                camera_position[0] = tracking_data->camera_position[0];
-                camera_position[1] = tracking_data->camera_position[1];
-                camera_position[2] = tracking_data->camera_position[2];
+                camera_position[0] = tracking_data->camera_position[0] - origin[0];
+                camera_position[1] = tracking_data->camera_position[1] - origin[1];
+                camera_position[2] = tracking_data->camera_position[2] - origin[2];
 
                 app->setCameraPosition(camera_position[0], camera_position[1], camera_position[2]);
             }
@@ -440,7 +446,6 @@ void dtrackTask(uint16_t local_port, int camera_id, int controller_id, TrackSync
     {
         if (dt->receive())
         {
-            // TODO: use mutex, look for tracked IDs (e.g. camera), update synced data
             printf("DTrack: received data for %d tracked bodies\n", dt->getNumBody());
             for (int i = 0; i < dt->getNumBody(); i++)
             {
@@ -449,23 +454,19 @@ void dtrackTask(uint16_t local_port, int camera_id, int controller_id, TrackSync
                 {
                     if (body->id == camera_id)
                     {
-                        DTrackQuaternion quat = body->getQuaternion();
-                        printf("CAMERA %3d: pos = (%.3f, %.3f, %.3f); rot = (%.3f, %.3f, %.3f, %.3f)\n", body->id,
-                            body->loc[0], body->loc[1], body->loc[2], quat.w, quat.x, quat.y, quat.z);
-                        {
-                            std::lock_guard lock(tracking_data->sync_mutex);
-                            tracking_data->camera_position[0] = body->loc[0];
-                            tracking_data->camera_position[1] = body->loc[1];
-                            tracking_data->camera_position[2] = body->loc[2];
-                            tracking_data->new_data = true;
-                        }
+                        std::lock_guard lock(tracking_data->sync_mutex);
+                        //DTrackQuaternion quat = body->getQuaternion();
+                        tracking_data->camera_position[0] = 0.001 * body->loc[0];
+                        tracking_data->camera_position[1] = 0.001 * body->loc[1];
+                        tracking_data->camera_position[2] = 0.001 * body->loc[2];
+                        tracking_data->new_data = true;
                     }
-                    else
-                    {
-                        DTrackQuaternion quat = body->getQuaternion();
-                        printf("[BODY] %3d: pos = (%.3f, %.3f, %.3f); rot = (%.3f, %.3f, %.3f, %.3f)\n", body->id,
-                            body->loc[0], body->loc[1], body->loc[2], quat.w, quat.x, quat.y, quat.z);
-                    }
+                    //else
+                    //{
+                    //    DTrackQuaternion quat = body->getQuaternion();
+                    //    printf("[BODY] %3d: pos = (%.3f, %.3f, %.3f); rot = (%.3f, %.3f, %.3f, %.3f)\n", body->id,
+                    //        body->loc[0], body->loc[1], body->loc[2], quat.w, quat.x, quat.y, quat.z);
+                    //}
                 }
             }
         }

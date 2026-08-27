@@ -1,6 +1,6 @@
 OmniSurface Config
-Camera Tracking: DTrack, 5000, 1, 2
-Monitor: 0
+Camera Tracking: DTrack, 5000, 0, 1
+Monitor: 2
 Surface Count: 1, 1
 [
   Base Shape: cylinder

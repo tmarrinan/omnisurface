@@ -12,6 +12,28 @@ set(GLAD_DIR "" CACHE PATH "Local directory containing GLAD include and lib deve
 find_package(Vulkan REQUIRED)
 find_package(glfw3 REQUIRED)
 
+# Fetch libwebsockets
+include(FetchContent)
+FetchContent_Declare(
+    libwebsockets
+    GIT_REPOSITORY https://github.com/warmcat/libwebsockets.git
+    GIT_TAG        v5.0.0
+)
+set(LWS_WITH_STATIC ON CACHE BOOL "" FORCE)
+set(LWS_WITHOUT_TESTAPPS ON CACHE BOOL "" FORCE)
+set(LWS_WITHOUT_TEST_SERVER ON CACHE BOOL "" FORCE)
+if(WIN32)
+    set(LWS_WITH_SCHANNEL ON CACHE BOOL "" FORCE)
+    set(LWS_WITH_SSL OFF CACHE BOOL "" FORCE)
+    set(LWS_WITH_GNUTLS OFF CACHE BOOL "" FORCE)
+    set(LWS_WITH_MBEDTLS OFF CACHE BOOL "" FORCE)
+    set(LWS_WITH_WOLFSSL OFF CACHE BOOL "" FORCE)
+else()
+    set(LWS_WITH_SSL ON CACHE BOOL "" FORCE)
+    find_package(OpenSSL REQUIRED)
+endif()
+FetchContent_MakeAvailable(libwebsockets)
+
 
 # Add local Glad library
 add_library(GLAD STATIC IMPORTED GLOBAL)
@@ -38,6 +60,8 @@ add_executable(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/uWebSockets/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/uWebSockets/uSockets/src
 )
 
 target_sources(${PROJECT_NAME} PRIVATE
@@ -71,6 +95,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     glfw
     GLAD
     DTrackSDK_LIB
+    websockets
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
