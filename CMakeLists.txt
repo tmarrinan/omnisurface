@@ -64,9 +64,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_sources(${PROJECT_NAME} PRIVATE
     include/stb_image.h
+    include/stb_image_resize2.h
+    include/imgloader.h
     include/native_render_handle.h
     include/vk360.h
     include/uiserver.h
+    src/imgloader.cpp
     src/vk360.cpp
     src/uiserver.cpp
     src/main.cpp

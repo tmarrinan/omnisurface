@@ -5,8 +5,7 @@
 #include <fstream>
 #include <algorithm>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "imgloader.h"
 #include "vk360.h"
 
 #ifndef M_PI
@@ -200,6 +199,10 @@ bool vk360::DisplayConfig::loadFromFile(const char* config_filename)
             _origin[1] = std::stof(line.substr(comma1 + 1, comma2 - comma1 - 1));
             _origin[2] = std::stof(line.substr(comma2 + 1));
         }
+        else if (line.length() >= 18 && line.substr(0, 17) == "Image Directory: ")
+        {
+            _img_dir = line.substr(17);
+        }
 
         line0 = false;
     }
@@ -267,6 +270,11 @@ void vk360::DisplayConfig::getOrigin(float* origin)
     origin[2] = _origin[2];
 }
 
+std::filesystem::path vk360::DisplayConfig::getImageDirectory()
+{
+    return _img_dir;
+}
+
 void vk360::DisplayConfig::printConfig()
 {
     // TODO: maybe store 4 corners of planar surface instead of center and normal and size
@@ -310,6 +318,7 @@ void vk360::DisplayConfig::printConfig()
             printf("    sector:   %.4f - %.4f\n", _surfaces[i]->d3[0] * (180.0 / M_PI), _surfaces[i]->d3[1] * (180.0 / M_PI));
         }
     }
+    printf("Image Directory: %s\n", _img_dir.make_preferred().string().c_str());
     printf("**************************************\n");
 }
 
@@ -417,7 +426,7 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
 
     // Read image
     int w, h, ch;
-    uint8_t* pixels = stbi_load(path, &w, &h, &ch, 4);
+    uint8_t* pixels = img::loadImageFromFile(path, &w, &h, &ch, 4);
 
     // Create CPU buffer to store image pixels
     size_t image_size = w * h * 4;
@@ -455,7 +464,7 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
     vkUnmapMemory(_vk.device, buffer_mem);
 
     // Free pixels from CPU memory
-    stbi_image_free(pixels);
+    img::freeImage(pixels);
 
     // Create image
     VkImageCreateInfo image_create_info{};

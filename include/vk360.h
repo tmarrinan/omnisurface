@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -41,6 +42,7 @@ namespace vk360 {
         uint16_t _tracking_port;
         int _tracking_camera_id;
         int _tracking_controller_id;
+        std::filesystem::path _img_dir;
     public:
         DisplayConfig();
         ~DisplayConfig();
@@ -56,6 +58,7 @@ namespace vk360 {
         uint32_t getSurfaceCount();
         void getSurface(uint32_t index, GLSLDisplaySurface** surf_ptr);
         void getOrigin(float* origin);
+        std::filesystem::path getImageDirectory();
         void printConfig();
     };
 

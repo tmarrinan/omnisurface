@@ -77,10 +77,10 @@ int main()
     }
     config->printConfig();
 
-    // TEST WS Server
+    // UI Server (image selection from remote web browser)
     uis::UiServer* server = new uis::UiServer("http", 8080);
+    server->setImageSelectionRootDirectory(config->getImageDirectory());
     server->listenAsync();
-    // End: TEST
 
     // Create fullscreen window
     int window_w, window_h;

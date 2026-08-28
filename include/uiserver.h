@@ -1,7 +1,6 @@
 #pragma once
 #include <iostream>
 #include <cstdint>
-#include <string>
 #include <filesystem>
 #include <thread>
 #include "libwebsockets.h"
@@ -12,6 +11,8 @@ namespace uis {
 		std::thread _net_thread;
 		struct lws_context* _context;
 		std::filesystem::path _http_dir;
+		std::filesystem::path _img_select_root_dir;
+		std::filesystem::path _img_select_current_dir;
 		bool _running;
 
 	public:
@@ -19,6 +20,7 @@ namespace uis {
 		~UiServer();
 
 		std::filesystem::path getHttpDirectory();
+		void setImageSelectionRootDirectory(std::filesystem::path img_select_dir);
 		void listen();
 		void listenAsync();
 		void shutdown();
