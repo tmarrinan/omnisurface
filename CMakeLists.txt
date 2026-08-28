@@ -60,15 +60,15 @@ add_executable(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/extern/uWebSockets/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/extern/uWebSockets/uSockets/src
 )
 
 target_sources(${PROJECT_NAME} PRIVATE
     include/stb_image.h
     include/native_render_handle.h
     include/vk360.h
+    include/uiserver.h
     src/vk360.cpp
+    src/uiserver.cpp
     src/main.cpp
 )
 
@@ -137,4 +137,12 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/resrc
         $<TARGET_FILE_DIR:${PROJECT_NAME}>/resrc
+)
+
+# Copy 'http' directory to output
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/http
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>/http
 )

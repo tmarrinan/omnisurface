@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #include "DTrackSDK.hpp"
-#include "libwebsockets.h"
+#include "uiserver.h"
 #include "vk360.h"
 
 #ifndef M_PI
@@ -69,8 +69,8 @@ int main()
 {
     // Read in display configuration
     vk360::DisplayConfig *config = new vk360::DisplayConfig();
-    //if (!config->loadFromFile("resrc/config_3plane.txt"))
-    if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
+    if (!config->loadFromFile("resrc/config_3plane.txt"))
+    //if (!config->loadFromFile("resrc/config_halfcylinder.txt"))
     {
         fprintf(stderr, "OmniSurface> Error: Failed to read config file\n");
         return EXIT_FAILURE;
@@ -78,8 +78,8 @@ int main()
     config->printConfig();
 
     // TEST WS Server
-    struct lws_context_creation_info info;
-    memset(&info, 0, sizeof(info));
+    uis::UiServer* server = new uis::UiServer("http", 8080);
+    server->listenAsync();
     // End: TEST
 
     // Create fullscreen window
@@ -254,9 +254,13 @@ int main()
         glSignalSemaphoreEXT(present[buffer_idx].sem_signal_available, 0, nullptr, 1, buffers, layouts);
         glFlush();
     }
-    tracking_data->exit = true;
 
+    // Stop DTrack
+    tracking_data->exit = true;
     if (tracking_thread.joinable()) tracking_thread.join();
+
+    // Stop UI Server
+    server->shutdown();
 
     return EXIT_SUCCESS;
 }
