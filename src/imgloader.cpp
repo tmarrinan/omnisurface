@@ -1,7 +1,9 @@
 #include <cstring>
 #define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "stb_image.h"
+#include "stb_image_write.h"
 #include "stb_image_resize2.h"
 #include "imgloader.h"
 
@@ -32,4 +34,14 @@ uint8_t* img::resizeImage(uint8_t* image, int width, int height, int channels, i
 	uint8_t* out = static_cast<uint8_t*>(stbi__malloc(new_w * new_h * channels));
 	stbir_resize_uint8_linear(image, width, height, 0, out, new_w, new_h, 0, static_cast<stbir_pixel_layout>(channels));
 	return out;
+}
+
+void img::saveImageJpeg(const char* filename, uint8_t* image, int width, int height, int channels, int quality)
+{
+	stbi_write_jpg(filename, width, height, channels, image, quality);
+}
+
+void img::saveImagePng(const char* filename, uint8_t* image, int width, int height, int channels)
+{
+	stbi_write_png(filename, width, height, channels, image, width * channels);
 }

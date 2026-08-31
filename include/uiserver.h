@@ -21,6 +21,8 @@ namespace uis {
 
 		std::filesystem::path getHttpDirectory();
 		void setImageSelectionRootDirectory(std::filesystem::path img_select_dir);
+		std::filesystem::path getImageSelectionRootDirectory();
+		std::filesystem::path getImageSelectionCurrentDirectory();
 		void listen();
 		void listenAsync();
 		void shutdown();
