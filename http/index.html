@@ -4,9 +4,63 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OmniSurface UI</title>
-    <!--<link rel="stylesheet" href="style.css">-->
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 </head>
 <body>
-    <h1>Hello World!</h1>
+    <div id="app">
+        <h1>OmniSurface Media Browser</h1>
+        <div class="row">
+            <div v-for="(dir, index) in media.folders" :id="'dir' + index" class="s-6 m-3 l-2" @click="selectFolder($event)">
+                <img src="images/directory_icon.png" alt="directory icon" />
+                <p class="center-text">{{ dir }}</p>
+            </div>
+            <div v-for="(file, index) in media.files" :id="'file' + index" class="s-6 m-3 l-2" @click="selectFile($event)">
+                <img :src="'thumbnail/' + current_path + '/' + file" alt="360 media thumbnail" />
+                <p class="center-text">{{ file }}</p>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+    const { createApp, ref, onMounted } = Vue;
+    
+    createApp({
+        setup() {
+            let current_path = ref('');
+            let media = ref({folders:[], files: []});
+        
+            function fetchCurrentMedia() {
+                fetch('/json/current-media')
+                .then((response) => {
+                    return response.json();
+                })
+                .then((data) => {
+                    console.log(data);
+                    media.value = data;
+                })
+                .catch((error) => {
+                    console.log(error);
+                });
+            }
+            
+            function selectFolder(event) {
+                let index = parseInt(event.currentTarget.id.substring(3));
+                console.log('Clicked folder: ' + media.value.folders[index]); 
+            }
+            
+            function selectFile(event) {
+                let index = parseInt(event.currentTarget.id.substring(4));
+                console.log('Clicked file: ' + media.value.files[index]); 
+            }
+            
+            onMounted(() => {
+                fetchCurrentMedia();
+            });
+            
+            return { current_path, media, selectFolder, selectFile };
+        }
+    }).mount('#app');
+    </script>
 </body>
 </html>

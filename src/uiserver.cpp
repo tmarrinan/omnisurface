@@ -1,5 +1,6 @@
+#include <algorithm>
 #include <string>
-#include <map>
+#include <vector>
 
 #include "imgloader.h"
 #include "uiserver.h"
@@ -18,6 +19,16 @@ static bool isSafeReqPath(std::filesystem::path root_dir, std::filesystem::path 
 		std::mismatch(canonical_base.begin(), canonical_base.end(), full_path.begin(), full_path.end());
 
 	return (mismatch_result.first == canonical_base.end());
+}
+
+static bool compareCharIgnoreCase(unsigned char ch1, unsigned char ch2)
+{
+	return std::tolower(ch1) < std::tolower(ch2);
+}
+
+static bool compareStringIgnoreCase(const std::string& a, const std::string& b)
+{
+	return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(), compareCharIgnoreCase);
 }
 
 static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len)
@@ -139,8 +150,8 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 				}
 			}
 
-			std::sort(files.begin(), files.end());
-			std::sort(directories.begin(), directories.end());
+			std::sort(files.begin(), files.end(), compareStringIgnoreCase);
+			std::sort(directories.begin(), directories.end(), compareStringIgnoreCase);
 
 			std::string response_body = "{\"folders\":[";
 			for (int i = 0; i < directories.size(); i++)
@@ -168,10 +179,10 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 			{
 				return 1;
 			}
-
+			
 			std::vector<uint8_t> send_buf(LWS_PRE + response_body.size());
 			std::memcpy(&send_buf[LWS_PRE], response_body.data(), response_body.size());
-
+			
 			int bytes_written = lws_write(wsi, &send_buf[LWS_PRE], response_body.size(), LWS_WRITE_HTTP_FINAL);
 			if (bytes_written < 0)
 			{
