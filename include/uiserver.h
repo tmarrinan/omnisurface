@@ -14,6 +14,8 @@ namespace uis {
 		std::filesystem::path _img_select_root_dir;
 		std::filesystem::path _img_select_current_dir;
 		bool _running;
+		bool _file_selected;
+		std::filesystem::path _selected_file_path;
 
 	public:
 		UiServer(std::filesystem::path http_dir, uint16_t port);
@@ -21,8 +23,13 @@ namespace uis {
 
 		std::filesystem::path getHttpDirectory();
 		void setImageSelectionRootDirectory(std::filesystem::path img_select_dir);
+		void setImageSelectionCurrentDirectory(std::filesystem::path img_select_dir);
 		std::filesystem::path getImageSelectionRootDirectory();
 		std::filesystem::path getImageSelectionCurrentDirectory();
+		bool fileSelected();
+		void setNewSelectedFile(std::filesystem::path file_path);
+		void markSelectedFileAsProcessed();
+		std::filesystem::path getSelectedFileName();
 		void listen();
 		void listenAsync();
 		void shutdown();

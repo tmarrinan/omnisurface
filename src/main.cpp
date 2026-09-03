@@ -192,6 +192,14 @@ int main()
             glfwSetWindowShouldClose(window, true);
         }
 
+        // Check if new 360 image file selected from UI
+        if (server->fileSelected())
+        {
+            std::filesystem::path media = server->getSelectedFileName();
+            server->markSelectedFileAsProcessed();
+            printf("MAIN: New Media File from UI Server> %s\n", media.string().c_str());
+        }
+
         // Update position (TODO: modify to account for delta time)
         if (interaction.camera_move[0]) camera_position[0] -= 0.05;
         if (interaction.camera_move[1]) camera_position[0] += 0.05;

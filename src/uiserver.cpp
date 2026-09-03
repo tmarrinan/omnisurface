@@ -49,6 +49,7 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 		{
 			std::string thumbnail_path = uri_path.substr(11);
 			std::filesystem::path cache_path = web_root / "cache" / thumbnail_path;
+			cache_path.make_preferred();
 			if (!std::filesystem::is_regular_file(cache_path))
 			{
 				int w, h, ch;
@@ -153,7 +154,10 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 			std::sort(files.begin(), files.end(), compareStringIgnoreCase);
 			std::sort(directories.begin(), directories.end(), compareStringIgnoreCase);
 
-			std::string response_body = "{\"folders\":[";
+			std::filesystem::path current_relative = std::filesystem::relative(media_dir, server->getImageSelectionRootDirectory());
+
+			std::string response_body = "{\"directory\": \"" + current_relative.string() + "\"";
+			response_body += ",\"folders\":[";
 			for (int i = 0; i < directories.size(); i++)
 			{
 				response_body += "\"" + directories[i] + "\"";
@@ -195,6 +199,26 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 
 			return 1;
 		}
+		break;
+	}
+	case LWS_CALLBACK_RECEIVE:
+	{
+		std::string message = std::string((const char*)in, len);
+		if (message.length() >= 8 && message.substr(0, 7) == "FOLDER:")
+		{
+			std::string folder = message.substr(7);
+			std::filesystem::path new_folder = server->getImageSelectionCurrentDirectory() / folder;
+			printf("NEW FOLDER: %s\n", new_folder.string().c_str());
+			server->setImageSelectionCurrentDirectory(new_folder);
+		}
+		else if (message.length() >= 6 && message.substr(0, 5) == "FILE:")
+		{
+			std::string file = message.substr(5);
+			std::filesystem::path new_file = server->getImageSelectionCurrentDirectory() / file;
+			printf("NEW FILE: %s\n", new_file.string().c_str());
+			server->setNewSelectedFile(new_file);
+		}
+		break;
 	}
     default:
         break;
@@ -203,7 +227,7 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 }
 
 uis::UiServer::UiServer(std::filesystem::path http_dir, uint16_t port) :
-	_context {nullptr}, _running {false}, _http_dir {http_dir}
+	_context {nullptr}, _running {false}, _http_dir {http_dir}, _file_selected {false}, _selected_file_path {""}
 {
 	const struct lws_protocols protocols[] = {
 	    { "http", callbackHttp, sizeof(PerSessionHttpData), 0},
@@ -242,6 +266,11 @@ void uis::UiServer::setImageSelectionRootDirectory(std::filesystem::path img_sel
 	_img_select_current_dir = img_select_dir;
 }
 
+void  uis::UiServer::setImageSelectionCurrentDirectory(std::filesystem::path img_select_dir)
+{
+	_img_select_current_dir = img_select_dir;
+}
+
 std::filesystem::path uis::UiServer::getImageSelectionRootDirectory()
 {
 	return _img_select_root_dir;
@@ -250,6 +279,27 @@ std::filesystem::path uis::UiServer::getImageSelectionRootDirectory()
 std::filesystem::path uis::UiServer::getImageSelectionCurrentDirectory()
 {
 	return _img_select_current_dir;
+}
+
+bool uis::UiServer::fileSelected()
+{
+	return _file_selected;
+}
+
+void uis::UiServer::setNewSelectedFile(std::filesystem::path file_path)
+{
+	_file_selected = true;
+	_selected_file_path = file_path;
+}
+
+void uis::UiServer::markSelectedFileAsProcessed()
+{
+	_file_selected = false;
+}
+
+std::filesystem::path uis::UiServer::getSelectedFileName()
+{
+	return _selected_file_path;
 }
 
 void uis::UiServer::listen()

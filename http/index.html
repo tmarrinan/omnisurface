@@ -11,6 +11,10 @@
     <div id="app">
         <h1>OmniSurface Media Browser</h1>
         <div class="row">
+            <div v-if="current_path !== '' && current_path !== '.'" class="s-6 m-3 l-2" @click="selectParentFolder($event)">
+                <img src="images/parent_icon.png" alt="directory icon" />
+                <p class="center-text">.. (go back)</p>
+            </div>
             <div v-for="(dir, index) in media.folders" :id="'dir' + index" class="s-6 m-3 l-2" @click="selectFolder($event)">
                 <img src="images/directory_icon.png" alt="directory icon" />
                 <p class="center-text">{{ dir }}</p>
@@ -27,9 +31,24 @@
     
     createApp({
         setup() {
+            // Model data
             let current_path = ref('');
             let media = ref({folders:[], files: []});
+            
+            // Connect to WebSocket server
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const ws = new WebSocket(protocol + '//' + window.location.host);
+            
+            // WebSocket listeners
+            ws.onopen = () => {
+                console.log('Connected to WebSocket server!');
+            };
+            
+            ws.onmessage = (event) => {
+                console.log(event.data);
+            };
         
+            // Function: fetch current list of files/folders to select media from
             function fetchCurrentMedia() {
                 fetch('/json/current-media')
                 .then((response) => {
@@ -37,6 +56,7 @@
                 })
                 .then((data) => {
                     console.log(data);
+                    current_path.value = data.directory;
                     media.value = data;
                 })
                 .catch((error) => {
@@ -44,21 +64,32 @@
                 });
             }
             
+            // Function:
+            function selectParentFolder(event) {
+                console.log('PARENT');
+            }
+            
+            // Function: handle user selection of folder
             function selectFolder(event) {
                 let index = parseInt(event.currentTarget.id.substring(3));
-                console.log('Clicked folder: ' + media.value.folders[index]); 
+                console.log('Clicked folder: ' + media.value.folders[index]);
+                ws.send('FOLDER:' + media.value.folders[index]);
+                fetchCurrentMedia();
             }
             
+            // Function: handle user selection of media file
             function selectFile(event) {
                 let index = parseInt(event.currentTarget.id.substring(4));
-                console.log('Clicked file: ' + media.value.files[index]); 
+                console.log('Clicked file: ' + media.value.files[index]);
+                ws.send('FILE:' + media.value.files[index]);
             }
             
+            // On start-up: populate with initial media
             onMounted(() => {
                 fetchCurrentMedia();
             });
             
-            return { current_path, media, selectFolder, selectFile };
+            return { current_path, media, selectParentFolder, selectFolder, selectFile };
         }
     }).mount('#app');
     </script>
