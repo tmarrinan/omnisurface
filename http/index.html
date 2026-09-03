@@ -9,17 +9,19 @@
 </head>
 <body>
     <div id="app">
-        <h1>OmniSurface Media Browser</h1>
         <div class="row">
-            <div v-if="current_path !== '' && current_path !== '.'" class="s-6 m-3 l-2" @click="selectParentFolder($event)">
+            <h1 class="s-12">OmniSurface Media Browser</h1>
+        </div>
+        <div class="row">
+            <div v-if="current_path !== '' && current_path !== '.'" class="s-6 m-3 l-2 media-card" @click="selectParentFolder($event)">
                 <img src="images/parent_icon.png" alt="directory icon" />
                 <p class="center-text">.. (go back)</p>
             </div>
-            <div v-for="(dir, index) in media.folders" :id="'dir' + index" class="s-6 m-3 l-2" @click="selectFolder($event)">
+            <div v-for="(dir, index) in media.folders" :id="'dir' + index" class="s-6 m-3 l-2 media-card" @click="selectFolder($event)">
                 <img src="images/directory_icon.png" alt="directory icon" />
                 <p class="center-text">{{ dir }}</p>
             </div>
-            <div v-for="(file, index) in media.files" :id="'file' + index" class="s-6 m-3 l-2" @click="selectFile($event)">
+            <div v-for="(file, index) in media.files" :id="'file' + index" class="s-6 m-3 l-2 media-card" @click="selectFile($event)">
                 <img :src="'thumbnail/' + current_path + '/' + file" alt="360 media thumbnail" />
                 <p class="center-text">{{ file }}</p>
             </div>
@@ -64,9 +66,11 @@
                 });
             }
             
-            // Function:
+            // Function: handle user selection of parent/go-back folder
             function selectParentFolder(event) {
                 console.log('PARENT');
+                ws.send('PARENT');
+                fetchCurrentMedia();
             }
             
             // Function: handle user selection of folder

@@ -218,6 +218,18 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 			printf("NEW FILE: %s\n", new_file.string().c_str());
 			server->setNewSelectedFile(new_file);
 		}
+		else if (message.length() >= 6 && message.substr(0, 6) == "PARENT")
+		{
+			std::filesystem::path new_folder = server->getImageSelectionCurrentDirectory().parent_path();
+			if (isSafeReqPath(server->getImageSelectionRootDirectory(), new_folder))
+			{
+				printf("NEW FOLDER: %s\n", new_folder.string().c_str());
+				server->setImageSelectionCurrentDirectory(new_folder);
+			}
+			else {
+				printf("WARNING: attempting to access parent outside scope of root media directory\n");
+			}
+		}
 		break;
 	}
     default:

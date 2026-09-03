@@ -1,10 +1,23 @@
 html {
     font-family: Helvetica, Arial, sans-serif;
     font-size: 100%;
+    background-color: #333333;
+    color: #FFFFFF; 
+}
+
+h1 {
+    font-size: 1.8rem;
+    font-weight: bold;    
 }
 
 p {
     font-size: 1rem;
+}
+
+.media-card {
+    background-color: #4E4E4E;
+    border-radius: 1rem;
+    overflow: hidden;
 }
 
 /* Prevent images and media from overflowing their column widths */
