@@ -196,8 +196,8 @@ int main()
         if (server->fileSelected())
         {
             std::filesystem::path media = server->getSelectedFileName();
+            app->loadImage(media.string().c_str(), false); // TODO: figure out way to tell if stereo or no
             server->markSelectedFileAsProcessed();
-            printf("MAIN: New Media File from UI Server> %s\n", media.string().c_str());
         }
 
         // Update position (TODO: modify to account for delta time)
