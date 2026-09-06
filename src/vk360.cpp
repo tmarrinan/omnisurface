@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <map>
+#include <vector>
 #include <fstream>
 #include <algorithm>
 
@@ -426,10 +428,16 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
     }
 
     // Get image medadata
-    std::string img_license;
-    bool img_is_stereo;
-    int rv = mmd::getImageLicenseAndStereo(path, &img_license, &img_is_stereo);
-    printf("METADATA: (c): %s, 3D: %d\n", img_license.c_str(), img_is_stereo);
+    std::map<std::string, std::string> metadata;
+    std::vector<std::string> fields = { "ImageWidth", "ImageHeight", "Copyright", "License", "TermsOfUse", "StereoMode", "MultiViewCount" };
+    int rv = mmd::getImageMetaData(path, fields, &metadata);
+    printf("METADATA: \n");
+    for (std::map<std::string, std::string>::const_iterator it = metadata.begin(); it != metadata.end(); it++)
+    {
+        std::string key = it->first;
+        std::string value = it->second;
+        printf("  %s: %s\n", key.c_str(), value.c_str());
+    }
 
     // Read image
     int w, h, ch;
