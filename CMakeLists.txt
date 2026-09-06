@@ -12,13 +12,15 @@ set(GLAD_DIR "" CACHE PATH "Local directory containing GLAD include and lib deve
 find_package(Vulkan REQUIRED)
 find_package(glfw3 REQUIRED)
 
-# Fetch libwebsockets
 include(FetchContent)
+
+# Fetch libwebsockets
 FetchContent_Declare(
     libwebsockets
     GIT_REPOSITORY https://github.com/warmcat/libwebsockets.git
-    GIT_TAG        v5.0.0
+    GIT_TAG        v4.5.8
 )
+set(LWS_WITH_SHARED OFF CACHE BOOL "" FORCE)
 set(LWS_WITH_STATIC ON CACHE BOOL "" FORCE)
 set(LWS_WITHOUT_TESTAPPS ON CACHE BOOL "" FORCE)
 set(LWS_WITHOUT_TEST_SERVER ON CACHE BOOL "" FORCE)
@@ -67,10 +69,12 @@ target_sources(${PROJECT_NAME} PRIVATE
     include/stb_image_write.h
     include/stb_image_resize2.h
     include/imgloader.h
+    include/metadata.h
     include/native_render_handle.h
     include/vk360.h
     include/uiserver.h
     src/imgloader.cpp
+    src/metadata.cpp
     src/vk360.cpp
     src/uiserver.cpp
     src/main.cpp
@@ -101,6 +105,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     DTrackSDK_LIB
     websockets
 )
+
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:${PROJECT_NAME}>"

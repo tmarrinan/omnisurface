@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "imgloader.h"
+#include "metadata.h"
 #include "vk360.h"
 
 #ifndef M_PI
@@ -423,6 +424,12 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
         vkDestroyImage(_vk.device, _vk.media360.image, nullptr);
         vkFreeMemory(_vk.device, _vk.media360.memory, nullptr);
     }
+
+    // Get image medadata
+    std::string img_license;
+    bool img_is_stereo;
+    int rv = mmd::getImageLicenseAndStereo(path, &img_license, &img_is_stereo);
+    printf("METADATA: (c): %s, 3D: %d\n", img_license.c_str(), img_is_stereo);
 
     // Read image
     int w, h, ch;
