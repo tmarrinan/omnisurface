@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <map>
 
 #include "imgloader.h"
+#include "metadata.h"
 #include "uiserver.h"
 
 
@@ -156,6 +158,18 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 
 			std::filesystem::path current_relative = std::filesystem::relative(media_dir, server->getImageSelectionRootDirectory());
 
+			std::vector<std::filesystem::path> md_files;
+			for (int i = 0; i < files.size(); i++)
+			{
+				md_files.push_back(media_dir / files[i]);
+			}
+			std::vector<std::string> md_fields = { "ImageWidth", "ImageHeight", "StereoMode", "Copyright", "License", "TermsOfUse" };
+			std::map <std::string, std::map<std::string, std::string>> metadata;
+			mmd::getImagesMetaData(md_files, md_fields, &metadata);
+
+
+			std::map<std::string, std::string>::const_iterator it1, it2;
+
 			std::string response_body = "{\"directory\": \"" + current_relative.string() + "\"";
 			response_body += ",\"folders\":[";
 			for (int i = 0; i < directories.size(); i++)
@@ -166,7 +180,57 @@ static int callbackHttp(struct lws* wsi, enum lws_callback_reasons reason, void*
 			response_body += "],\"files\":[";
 			for (int i = 0; i < files.size(); i++)
 			{
-				response_body += "\"" + files[i] + "\"";
+				// Get image metadata
+				int iw = 0;
+				int ih = 0;
+				bool is_stereo = false;
+				std::string copyright = "";
+
+				std::filesystem::path filepath = media_dir / files[i];
+				std::string fkey = filepath.generic_string();
+				it1 = metadata[fkey].find("ImageWidth");
+				it2 = metadata[fkey].find("ImageHeight");
+				if (it1 != metadata[fkey].end() && it2 != metadata[fkey].end())
+				{
+					iw = std::stoi(it1->second);
+					ih = std::stoi(it2->second);
+					if (iw == ih) is_stereo = true;
+				}
+				it1 = metadata[fkey].find("StereoMode");
+				if (it1 != metadata[fkey].end())
+				{
+					if (it1->second == "mono") is_stereo = false;
+					else if (it1->second == "top-bottom") is_stereo = true;
+				}
+				it1 = metadata[fkey].find("Copyright");
+				if (it1 != metadata[fkey].end())
+				{
+					copyright = it1->second;
+				}
+				else
+				{
+					it1 = metadata[fkey].find("License");
+					if (it1 != metadata[fkey].end())
+					{
+						copyright = it1->second;
+					}
+					else
+					{
+						it1 = metadata[fkey].find("TermsOfUse");
+						if (it1 != metadata[fkey].end())
+						{
+							copyright = it1->second;
+						}
+					}
+				}
+
+				// Add file to response
+				response_body += "{\"name\":\"" + files[i] + "\",\"metadata\":{";
+				response_body += "\"width\":" + std::to_string(iw);
+				response_body += ",\"height\":" + std::to_string(ih);
+				response_body += ",\"is_stereo\":" + (is_stereo ? std::string("true") : std::string("false"));
+				if (copyright.length() > 0) response_body += ",\"copyright\":\"" + copyright + "\"";
+				response_body += "}}";
 				if (i < files.size() - 1) response_body += ",";
 			}
 			response_body += "]}";
@@ -258,8 +322,6 @@ uis::UiServer::UiServer(std::filesystem::path http_dir, uint16_t port) :
 		fprintf(stderr, "libwebsockets init failed\n");
 		return;
 	}
-
-	printf("UiServer> addr %p\n", this);
 }
 
 uis::UiServer::~UiServer()

@@ -22,8 +22,8 @@
                 <p class="center-text">{{ dir }}</p>
             </div>
             <div v-for="(file, index) in media.files" :id="'file' + index" class="s-6 m-3 l-2 media-card" @click="selectFile($event)">
-                <img :src="'thumbnail/' + current_path + '/' + file" alt="360 media thumbnail" />
-                <p class="center-text">{{ file }}</p>
+                <img :src="'thumbnail/' + current_path + '/' + file.name" alt="360 media thumbnail" />
+                <p class="center-text">{{ file.name }}</p>
             </div>
         </div>
     </div>
@@ -84,8 +84,8 @@
             // Function: handle user selection of media file
             function selectFile(event) {
                 let index = parseInt(event.currentTarget.id.substring(4));
-                console.log('Clicked file: ' + media.value.files[index]);
-                ws.send('FILE:' + media.value.files[index]);
+                console.log('Clicked file: ' + media.value.files[index].name);
+                ws.send('FILE:' + media.value.files[index].name);
             }
             
             // On start-up: populate with initial media

@@ -172,7 +172,7 @@ int main()
     GLenum draw_buffer_index[2] = { GL_BACK_LEFT, GL_BACK_RIGHT };
     if (!is_stereo) draw_buffer_index[0] = GL_BACK;
 
-    app->loadImage("resrc/images/SampleOmni3D.png", true);
+    app->loadImage("resrc/images/SampleOmni3D.png");
 
     // Main render loop
     GLuint buffers[1];
@@ -196,7 +196,7 @@ int main()
         if (server->fileSelected())
         {
             std::filesystem::path media = server->getSelectedFileName();
-            app->loadImage(media.string().c_str(), false); // TODO: figure out way to tell if stereo or no
+            app->loadImage(media.string().c_str());
             server->markSelectedFileAsProcessed();
         }
 

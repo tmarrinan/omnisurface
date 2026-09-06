@@ -188,7 +188,7 @@ namespace vk360 {
         void getExternalSignalAvailableSemaphoreHandle(uint32_t index, int* ext_handle);
         void getExternalWaitFinishedSemaphoreHandle(uint32_t index, int* ext_handle);
 #endif
-        void loadImage(const char* path, bool is_stereo);
+        void loadImage(const char* path);
         void setCameraPosition(float x, float y, float z);
         void setViewRotation(float yaw, float pitch);
         int drawFrame();

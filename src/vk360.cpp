@@ -414,7 +414,7 @@ void vk360::Vulkan360::getExternalWaitFinishedSemaphoreHandle(uint32_t index, in
     *ext_handle = _vk.render_buffer[index].sem_vk_finished.external_handle;
 }
 
-void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
+void vk360::Vulkan360::loadImage(const char* path)
 {
     // Free old texture (if exists)
     if (_vk.media360.image != VK_NULL_HANDLE)
@@ -428,16 +428,34 @@ void vk360::Vulkan360::loadImage(const char* path, bool is_stereo)
     }
 
     // Get image medadata
+    int stereo_mode = -1; // -1: unknown, 0: mono, 1: stereo
+
     std::map<std::string, std::string> metadata;
-    std::vector<std::string> fields = { "ImageWidth", "ImageHeight", "Copyright", "License", "TermsOfUse", "StereoMode", "MultiViewCount" };
-    int rv = mmd::getImageMetaData(path, fields, &metadata);
-    printf("METADATA: \n");
-    for (std::map<std::string, std::string>::const_iterator it = metadata.begin(); it != metadata.end(); it++)
+    std::vector<std::string> fields = { "ImageWidth", "ImageHeight", "StereoMode"}; //"Copyright", "License", "TermsOfUse"
+    mmd::getImageMetaData(path, fields, &metadata);
+
+    std::map<std::string, std::string>::const_iterator it1, it2;
+    it1 = metadata.find("StereoMode");
+    if (it1 != metadata.end())
     {
-        std::string key = it->first;
-        std::string value = it->second;
-        printf("  %s: %s\n", key.c_str(), value.c_str());
+        if (it1->second == "mono") stereo_mode = 0;
+        else if (it1->second == "top-bottom") stereo_mode = 1;
     }
+    if (stereo_mode == -1)
+    {
+        it1 = metadata.find("ImageWidth");
+        it2 = metadata.find("ImageHeight");
+        if (it1 != metadata.end() && it2 != metadata.end())
+        {
+            int iw = std::stoi(it1->second);
+            int ih = std::stoi(it2->second);
+            if (iw == 2 * ih) stereo_mode = 0;
+            else if (iw == ih) stereo_mode = 1;
+        }
+    }
+    bool is_stereo = false;
+    if (stereo_mode == -1) printf("Vulkan360> Warning: image may not be properly formatted 360. Could not detect mono/stereo.\n");
+    else if (stereo_mode == 1) is_stereo = true;
 
     // Read image
     int w, h, ch;
