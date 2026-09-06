@@ -15,15 +15,27 @@
         <div class="row">
             <div v-if="current_path !== '' && current_path !== '.'" class="s-6 m-3 l-2 media-card" @click="selectParentFolder($event)">
                 <img src="images/parent_icon.png" alt="directory icon" />
-                <p class="center-text">.. (go back)</p>
+                <div class="card-text">
+                    <p>.. (go back)</p>
+                </div>
             </div>
             <div v-for="(dir, index) in media.folders" :id="'dir' + index" class="s-6 m-3 l-2 media-card" @click="selectFolder($event)">
                 <img src="images/directory_icon.png" alt="directory icon" />
-                <p class="center-text">{{ dir }}</p>
+                <div class="card-text">
+                    <p>{{ dir }}</p>
+                </div>
             </div>
             <div v-for="(file, index) in media.files" :id="'file' + index" class="s-6 m-3 l-2 media-card" @click="selectFile($event)">
-                <img :src="'thumbnail/' + current_path + '/' + file.name" alt="360 media thumbnail" />
-                <p class="center-text">{{ file.name }}</p>
+                <div class="image-container">
+                    <img class="main-image" :src="'thumbnail/' + current_path + '/' + file.name" alt="360 media thumbnail" />
+                    <div class="icon-group">
+                        <img v-if="file.metadata.hasOwnProperty('copyright')" class="icon-overlay" src="images/copyright_icon.png" alt="copyright icon" @click="showCopyright($event, file.metadata.copyright)" />
+                        <img v-if="file.metadata.is_stereo" class="icon-overlay" src="images/stereo3d_icon.png" alt="stereo 3d icon" />
+                    </div>
+                </div>
+                <div class="card-text">
+                    <p>{{ file.name }}</p>
+                </div>
             </div>
         </div>
     </div>
@@ -88,12 +100,19 @@
                 ws.send('FILE:' + media.value.files[index].name);
             }
             
+            // Function: show media copyright info
+            function showCopyright(event, copyright) {
+                event.stopPropagation(); 
+                console.log(copyright);
+                // TODO: display copyright on page
+            }
+            
             // On start-up: populate with initial media
             onMounted(() => {
                 fetchCurrentMedia();
             });
             
-            return { current_path, media, selectParentFolder, selectFolder, selectFile };
+            return { current_path, media, selectParentFolder, selectFolder, selectFile, showCopyright };
         }
     }).mount('#app');
     </script>

@@ -199,7 +199,7 @@ int main()
             app->loadImage(media.string().c_str());
             server->markSelectedFileAsProcessed();
         }
-
+        
         // Update position (TODO: modify to account for delta time)
         if (interaction.camera_move[0]) camera_position[0] -= 0.05;
         if (interaction.camera_move[1]) camera_position[0] += 0.05;

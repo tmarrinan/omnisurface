@@ -12,12 +12,53 @@ h1 {
 
 p {
     font-size: 1rem;
+    margin: 0;
+    line-height: 1.2;
 }
 
 .media-card {
     background-color: #4E4E4E;
     border-radius: 1rem;
     overflow: hidden;
+    
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.card-text {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    margin: 0.2rem 0;
+}
+
+.image-container {
+    position: relative;
+    display: inline-block;
+}
+
+.main-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    z-index: 1;
+}
+
+.icon-group {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.icon-overlay {
+  width: 2rem;
+  height: auto;
 }
 
 /* Prevent images and media from overflowing their column widths */
@@ -30,11 +71,6 @@ img, video, canvas {
 /* Force borders and padding to calculate INSIDE the column width */
 *, *::before, *::after {
   box-sizing: border-box;
-}
-
-/* Center text*/
-.center-text {
-    text-align: center;
 }
 
 /* Core Grid Setup */
